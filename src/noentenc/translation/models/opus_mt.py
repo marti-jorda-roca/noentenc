@@ -6,7 +6,7 @@ from typing import ClassVar
 
 from tokenizers import Tokenizer
 
-from noentenc.languages import Language, LanguageSchema
+from noentenc.languages import Language, LanguageSchema, UnsupportedLanguageError
 from noentenc.translation.models._seq2seq import Precision, Seq2SeqModel
 
 L = Language
@@ -141,7 +141,7 @@ class OpusMTModel(Seq2SeqModel):
         source, target = Language(source_language), Language(target_language)
         if (source, target) not in OPUS_MT_PAIRS:
             available = sorted(str(t) for s, t in OPUS_MT_PAIRS if s == source)
-            raise ValueError(
+            raise UnsupportedLanguageError(
                 f"No Opus-MT model for {source}->{target}; targets from {source}: {available}"
             )
         return cls(

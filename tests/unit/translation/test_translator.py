@@ -121,3 +121,10 @@ def test_default_rejects_pairs_no_model_supports(
     with pytest.raises(UnsupportedLanguageError):
         # Acehnese is NLLB-only, and NLLB is never picked by default.
         default_translator.translate("hello", Language.ACEHNESE, EN)
+
+
+def test_default_rejection_without_source_names_only_the_target(
+    default_translator: Translator,
+) -> None:
+    with pytest.raises(UnsupportedLanguageError, match="translates into ace;"):
+        default_translator.translate("hello", Language.ACEHNESE)

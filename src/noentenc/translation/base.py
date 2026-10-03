@@ -110,8 +110,9 @@ class Translator:
                 self._default_models[key] = OpusMTModel.from_pair(source, target)
             return self._default_models[key]
         if not SMaLL100Model.schema.supports(source, target):
+            pair = f"into {target}" if source is None else f"{source}->{target}"
             raise UnsupportedLanguageError(
-                f"No default model translates {source}->{target}; pass a model explicitly"
+                f"No default model translates {pair}; pass a model explicitly"
             )
         if None not in self._default_models:
             self._default_models[None] = SMaLL100Model()

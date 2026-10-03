@@ -143,7 +143,7 @@ def test_opus_rejects_languages_outside_its_pair(opus_dir: Path) -> None:
 
 
 def test_opus_from_pair_rejects_unknown_pairs() -> None:
-    with pytest.raises(ValueError, match="No Opus-MT model"):
+    with pytest.raises(UnsupportedLanguageError, match="No Opus-MT model"):
         OpusMTModel.from_pair(Language.CATALAN, Language.JAPANESE)
 
 
