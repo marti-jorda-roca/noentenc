@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from noentenc.language_detection._optional import require
-from noentenc.language_detection.labels import UNDETERMINED, LabelMapper, to_iso639_3
+from noentenc.language_detection.labels import UNDETERMINED
 from noentenc.language_detection.models.base import BaseModel
 
 
@@ -46,28 +46,16 @@ class LinguaModel(BaseModel):
         if minimum_relative_distance:
             builder = builder.with_minimum_relative_distance(minimum_relative_distance)
         self._detector = builder.build()
-        self._mapper = LabelMapper(
-            [_code(lang) for lang in candidates],
-            normalize=normalize_labels,
-            collapse_macrolanguages=collapse_macrolanguages,
-        )
+        self._mapper = self._label_mapper([_code(lang) for lang in candidates])
 
-    @property
-    def labels(self) -> list[str]:
-        return list(self._mapper.labels)
-
-    def _label(self, language: Any) -> str:  # noqa: ANN401 - lingua.Language, imported lazily
-        if language is None:
-            return UNDETERMINED
-        return to_iso639_3(
-            _code(language), collapse_macrolanguages=self.collapse_macrolanguages
-        )
+    def _language_label(self, language: Any) -> str:  # noqa: ANN401 - lingua.Language, imported lazily
+        return UNDETERMINED if language is None else self._label(_code(language))
 
     def _predict_chunk(self, texts: list[str]) -> list[str]:
         if len(texts) == 1:
-            return [self._label(self._detector.detect_language_of(texts[0]))]
+            return [self._language_label(self._detector.detect_language_of(texts[0]))]
         return [
-            self._label(lang)
+            self._language_label(lang)
             for lang in self._detector.detect_languages_in_parallel_of(texts)
         ]
 
@@ -86,7 +74,7 @@ class LinguaModel(BaseModel):
             for value in values:  # already sorted descending
                 if value.value <= 0.0:
                     break
-                key = self._label(value.language)
+                key = self._language_label(value.language)
                 scores[key] = scores.get(key, 0.0) + value.value
             results.append(
                 dict(list(scores.items())[:top_k]) if scores else {UNDETERMINED: 1.0}

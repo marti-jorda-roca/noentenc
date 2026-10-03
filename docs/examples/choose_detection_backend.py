@@ -1,7 +1,7 @@
 """Swap the language-detection backend and tune its labels.
 
 Run: uv run python docs/examples/choose_detection_backend.py
-Needs the extras used below: uv add 'noentenc[onnx,lingua]'
+Needs the extras used below: uv add 'noentenc[lingua]'
 """
 
 from noentenc.language_detection import (

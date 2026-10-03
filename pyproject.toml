@@ -1,7 +1,7 @@
 [project]
 name = "noentenc"
 version = "0.1.0"
-description = "Lightweight, CPU-only language detection (and, soon, translation) for Python. The core depends only on numpy. Other backends are optional extras."
+description = "Lightweight, CPU-only language detection and translation for Python. Extra detection backends are optional extras."
 readme = "README.md"
 authors = [
     { name = "marti-jorda-roca", email = "mjorda98@gmail.com" }
@@ -17,16 +17,12 @@ dependencies = [
 [project.optional-dependencies]
 pandas = ["pandas>=3.0.6"]
 polars = ["polars>=1.44.2"]
-onnx = ["onnxruntime>=1.30", "tokenizers>=0.23"]
 lingua = ["lingua-language-detector>=2.2"]
 cld3 = ["cld3-py>=3.1"]
 heliport = ["heliport>=1.0.1; sys_platform != 'win32'"]
 langid = ["langid>=1.1.6"]
 langdetect = ["langdetect>=1.0.9"]
-all = ["noentenc[pandas,polars,onnx,lingua,cld3,heliport,langid,langdetect]"]
-
-[project.scripts]
-noentenc = "noentenc:main"
+all = ["noentenc[pandas,polars,lingua,cld3,heliport,langid,langdetect]"]
 
 [build-system]
 requires = ["uv_build>=0.12.22,<0.13.0"]
@@ -81,7 +77,6 @@ ignore = [
 # Magic values are the point in tests and one-off scripts; only library code must name them.
 # Examples print results and show expected output in comments.
 "docs/examples/**/*.py" = ["PLR2004", "T201", "ERA001"]
-"projects/*/tests/**/*.py" = ["PLR2004"]
 "scripts/**/*.py" = ["PLR2004", "T201"]
 "tests/**/*.py" = ["PLR2004"]
 

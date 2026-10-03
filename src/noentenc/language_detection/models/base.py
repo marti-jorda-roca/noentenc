@@ -1,14 +1,20 @@
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from noentenc.language_detection.labels import UNDETERMINED
+from noentenc.language_detection.labels import (
+    UNDETERMINED,
+    LabelMapper,
+    normalize_label,
+    normalize_scores,
+)
 
 
 class BaseModel(ABC):
     """A language-identification backend.
 
-    Subclasses implement ``_predict_chunk`` and ``_predict_score_chunk``. This base class handles
+    Subclasses implement ``_predict_chunk`` and ``_predict_score_chunk``, and either set
+    ``self._mapper`` (see ``_label_mapper``) or override ``labels``. This base class handles
     batching and the empty-text rule: empty or whitespace-only texts are ``"und"`` for every backend
     and never reach the model.
 
@@ -22,6 +28,7 @@ class BaseModel(ABC):
     # Backends that pad each batch to its longest text (transformers) set this, so batches are
     # formed from texts of similar length. Results are still returned in input order.
     sort_batches_by_length: bool = False
+    _mapper: LabelMapper
 
     def __init__(
         self,
@@ -36,9 +43,9 @@ class BaseModel(ABC):
         self.collapse_macrolanguages = collapse_macrolanguages
 
     @property
-    @abstractmethod
     def labels(self) -> list[str]:
         """Every label this model can return."""
+        return list(self._mapper.labels)
 
     @abstractmethod
     def _predict_chunk(self, texts: list[str]) -> list[str]:
@@ -78,6 +85,27 @@ class BaseModel(ABC):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(model={self.model!r})"
+
+    def _label_mapper(self, native_labels: Sequence[str]) -> LabelMapper:
+        return LabelMapper(
+            native_labels,
+            normalize=self.normalize_labels,
+            collapse_macrolanguages=self.collapse_macrolanguages,
+        )
+
+    def _label(self, native: str) -> str:
+        return normalize_label(
+            native,
+            normalize=self.normalize_labels,
+            collapse_macrolanguages=self.collapse_macrolanguages,
+        )
+
+    def _normalize_scores(self, scores: Mapping[str, float]) -> dict[str, float]:
+        return normalize_scores(
+            scores,
+            normalize=self.normalize_labels,
+            collapse_macrolanguages=self.collapse_macrolanguages,
+        )
 
 
 def _run_batched[T](

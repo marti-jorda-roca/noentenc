@@ -4,13 +4,16 @@ from huggingface_hub import hf_hub_download
 
 
 def resolve_files(
-    model: str | Path, filenames: list[str], only_local_files: bool = False
+    model: str | Path,
+    filenames: list[str],
+    only_local_files: bool = False,
+    revision: str | None = None,
 ) -> dict[str, Path]:
     """Map each relative filename to a local path.
 
     `model` is either a local directory or a Hugging Face repo id. For a repo,
-    only the requested files are downloaded (or read from the local cache when
-    `only_local_files` is set).
+    only the requested files are downloaded at `revision` (a commit; `None` means
+    the latest), or read from the local cache when `only_local_files` is set.
     """
     local_dir = Path(model)
     if local_dir.is_dir():
@@ -20,6 +23,13 @@ def resolve_files(
             raise FileNotFoundError(f"{local_dir} is missing {missing}")
         return paths
     return {
-        name: Path(hf_hub_download(str(model), name, local_files_only=only_local_files))
+        name: Path(
+            hf_hub_download(
+                str(model),
+                name,
+                revision=revision,
+                local_files_only=only_local_files,
+            )
+        )
         for name in filenames
     }

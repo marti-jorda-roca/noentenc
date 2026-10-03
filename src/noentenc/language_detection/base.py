@@ -1,13 +1,14 @@
-from typing import TYPE_CHECKING, Any, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
-from noentenc.language_detection._optional import require
+from noentenc._dataframe import column_values, with_column
 from noentenc.language_detection.models.base import BaseModel
-
-DEFAULT_TOP_K = 5
+from noentenc.language_detection.models.fasttext import FastTextModel
 
 if TYPE_CHECKING:
     import pandas as pd
     import polars as pl
+
+DEFAULT_TOP_K = 5
 
 
 class LanguageDetector:
@@ -19,11 +20,7 @@ class LanguageDetector:
     """
 
     def __init__(self, model: BaseModel | None = None) -> None:
-        if model is None:
-            from noentenc.language_detection.models.fasttext import FastTextModel
-
-            model = FastTextModel()
-        self.model = model
+        self.model = model or FastTextModel()
 
     @overload
     def detect(
@@ -114,14 +111,9 @@ class LanguageDetector:
         With ``with_score=True`` each cell is a list of ``{"language", "score"}`` records
         sorted by score, which gives polars a fixed schema. Null texts get ``"und"``.
         """
-        module = type(dataset).__module__.split(".", 1)[0]
-        if module not in {"polars", "pandas"}:
-            raise TypeError(
-                f"expected a polars or pandas DataFrame, got {type(dataset).__name__}"
-            )
         texts = [
             text if isinstance(text, str) else ""
-            for text in dataset[target_column].to_list()
+            for text in column_values(dataset, target_column)
         ]
         results: list[Any] = self.detect_batch(
             texts, batch_size=batch_size, with_score=with_score, top_k=top_k
@@ -131,9 +123,4 @@ class LanguageDetector:
                 [{"language": lang, "score": score} for lang, score in scores.items()]
                 for scores in results
             ]
-        if module == "polars":
-            polars = require("polars", "polars")
-            frame = cast("pl.DataFrame", dataset)
-            return frame.with_columns(polars.Series(result_column, results))
-        require("pandas", "pandas")
-        return cast("pd.DataFrame", dataset).assign(**{result_column: results})
+        return with_column(dataset, result_column, results)

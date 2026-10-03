@@ -4,9 +4,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import ClassVar
 
-import numpy as np
 from tokenizers import Tokenizer
 
+from noentenc._onnx import pad
 from noentenc.languages import Language
 from noentenc.translation.models._engine import (
     DecoderShape,
@@ -23,6 +23,17 @@ class Precision(StrEnum):
     Q4 = "q4"
 
 
+# File names of the `Xenova/*` exports (optimum + transformers.js quantizations).
+XENOVA_ONNX_FILES: dict[Precision, tuple[str, str]] = {
+    Precision.FP32: ("onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx"),
+    Precision.INT8: (
+        "onnx/encoder_model_quantized.onnx",
+        "onnx/decoder_model_merged_quantized.onnx",
+    ),
+    Precision.Q4: ("onnx/encoder_model_q4.onnx", "onnx/decoder_model_merged_q4.onnx"),
+}
+
+
 class Seq2SeqModel(BaseModel):
     """Shared tokenize → encode → greedy decode → detokenize pipeline.
 
@@ -31,9 +42,11 @@ class Seq2SeqModel(BaseModel):
     """
 
     default_model: ClassVar[str]
+    # Commit of `default_model` to download; other repos use the `revision` argument.
+    default_revision: ClassVar[str]
     default_precision: ClassVar[Precision]
     # (encoder, decoder) ONNX filenames inside the model repo, per precision.
-    onnx_files: ClassVar[dict[Precision, tuple[str, str]]]
+    onnx_files: ClassVar[dict[Precision, tuple[str, str]]] = XENOVA_ONNX_FILES
     extra_files: ClassVar[tuple[str, ...]] = ()
 
     def __init__(
@@ -41,10 +54,13 @@ class Seq2SeqModel(BaseModel):
         model: str | Path | None = None,
         only_local_files: bool = False,
         *,
+        revision: str | None = None,
         precision: Precision | str | None = None,
         num_threads: int | None = None,
     ) -> None:
-        super().__init__(model or self.default_model, only_local_files)
+        if model is None:
+            model, revision = self.default_model, self.default_revision
+        super().__init__(model, only_local_files)
         self.precision = Precision(precision or self.default_precision)
         if self.precision not in self.onnx_files:
             raise ValueError(
@@ -56,6 +72,7 @@ class Seq2SeqModel(BaseModel):
             self.model,
             ["config.json", "tokenizer.json", encoder, decoder, *self.extra_files],
             only_local_files,
+            revision=revision,
         )
         self.config = json.loads(files["config.json"].read_text())
         self.tokenizer = self._load_tokenizer(files)
@@ -73,14 +90,6 @@ class Seq2SeqModel(BaseModel):
             DecoderShape.from_config(self.config),
             num_threads,
         )
-
-    def predict(
-        self,
-        text: str,
-        target_language: Language,
-        source_language: Language | None = None,
-    ) -> str:
-        return self.predict_batch([text], target_language, source_language)[0]
 
     def predict_batch(
         self,
@@ -108,7 +117,7 @@ class Seq2SeqModel(BaseModel):
         outputs: list[list[int]] = [[] for _ in texts]
         for start in range(0, len(order), batch_size):
             chunk = order[start : start + batch_size]
-            input_ids, attention_mask = _pad(
+            input_ids, attention_mask = pad(
                 [sequences[i] for i in chunk], generation.pad_id
             )
             max_new_tokens = min(self.max_length, 2 * input_ids.shape[1] + 10)
@@ -140,13 +149,3 @@ class Seq2SeqModel(BaseModel):
 
     def _banned_ids(self) -> tuple[int, ...]:
         return ()
-
-
-def _pad(sequences: list[list[int]], pad_id: int) -> tuple[np.ndarray, np.ndarray]:
-    width = max(len(s) for s in sequences)
-    input_ids = np.full((len(sequences), width), pad_id, dtype=np.int64)
-    attention_mask = np.zeros((len(sequences), width), dtype=np.int64)
-    for row, sequence in enumerate(sequences):
-        input_ids[row, : len(sequence)] = sequence
-        attention_mask[row, : len(sequence)] = 1
-    return input_ids, attention_mask

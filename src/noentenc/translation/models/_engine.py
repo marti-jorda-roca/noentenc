@@ -5,6 +5,8 @@ from typing import cast
 import numpy as np
 import onnxruntime as ort
 
+from noentenc._onnx import create_session
+
 # Once at least this fraction of the batch has finished, drop finished rows so the
 # remaining decoder steps only compute live sequences.
 _COMPACT_FINISHED_RATIO = 0.5
@@ -34,16 +36,6 @@ class GenerationConfig:
     max_new_tokens: int
     forced_first_id: int | None = None
     banned_ids: tuple[int, ...] = ()
-
-
-def create_session(path: Path, num_threads: int | None) -> ort.InferenceSession:
-    options = ort.SessionOptions()
-    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-    options.inter_op_num_threads = 1
-    if num_threads is not None:
-        options.intra_op_num_threads = num_threads
-    return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
 
 
 class _DecodeState:

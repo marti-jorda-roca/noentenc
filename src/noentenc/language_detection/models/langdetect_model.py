@@ -1,12 +1,7 @@
 """langdetect backend: a port of Google's language-detection library (55 languages). Benchmark baseline."""
 
 from noentenc.language_detection._optional import require
-from noentenc.language_detection.labels import (
-    UNDETERMINED,
-    LabelMapper,
-    normalize_scores,
-    to_iso639_3,
-)
+from noentenc.language_detection.labels import UNDETERMINED
 from noentenc.language_detection.models.base import BaseModel
 
 
@@ -33,20 +28,9 @@ class LangdetectModel(BaseModel):
         langdetect.DetectorFactory.seed = seed
         detector_factory.init_factory()
         self._langdetect = langdetect
-        self._mapper = LabelMapper(
-            list(detector_factory._factory.get_lang_list()),  # noqa: SLF001 - no public accessor
-            normalize=normalize_labels,
-            collapse_macrolanguages=collapse_macrolanguages,
+        self._mapper = self._label_mapper(
+            detector_factory._factory.get_lang_list()  # noqa: SLF001 - no public accessor
         )
-
-    @property
-    def labels(self) -> list[str]:
-        return list(self._mapper.labels)
-
-    def _label(self, code: str) -> str:
-        if not self.normalize_labels:
-            return code
-        return to_iso639_3(code, collapse_macrolanguages=self.collapse_macrolanguages)
 
     def _predict_chunk(self, texts: list[str]) -> list[str]:
         out = []
@@ -63,17 +47,9 @@ class LangdetectModel(BaseModel):
         out = []
         for text in texts:
             try:
-                ranked = self._langdetect.detect_langs(text)[
-                    :top_k
-                ]  # sorted descending
+                ranked = self._langdetect.detect_langs(text)  # sorted descending
             except self._langdetect.LangDetectException:
                 out.append({UNDETERMINED: 1.0})
                 continue
-            out.append(
-                normalize_scores(
-                    {r.lang: r.prob for r in ranked},
-                    normalize=self.normalize_labels,
-                    collapse_macrolanguages=self.collapse_macrolanguages,
-                )
-            )
+            out.append(self._normalize_scores({r.lang: r.prob for r in ranked[:top_k]}))
         return out

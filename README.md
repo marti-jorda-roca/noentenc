@@ -94,8 +94,8 @@ translator.translate_dataset(df, "review", "review_en", Language.ENGLISH)
 | | `glotlid` | core | 2102 | 1.7 GB | Apache-2.0 |
 | | `nllb-lid218e` | core | 218 | 1.2 GB | CC-BY-NC-4.0 |
 | | path to a `.bin`/`.ftz` | core | | | |
-| `OnnxClassifierModel` | `bert-openlid` (int8) | `noentenc[onnx]` | 201 | 25 MB | MIT |
-| | `xlm-roberta-lid` (int8) | `noentenc[onnx]` | 20 | 279 MB | MIT |
+| `OnnxClassifierModel` | `bert-openlid` (int8) | core | 201 | 25 MB | MIT |
+| | `xlm-roberta-lid` (int8) | core | 20 | 279 MB | MIT |
 | `LinguaModel` | | `noentenc[lingua]` | 75 | ~300 MB wheel | Apache-2.0 |
 | `Cld3Model` | | `noentenc[cld3]` | 107 | 1 MB | Apache-2.0 |
 | `HeliportModel` | | `noentenc[heliport]` (no Windows) | 220 | ~130 MB wheel | GPL-3.0 |

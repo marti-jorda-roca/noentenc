@@ -1,4 +1,6 @@
 import json
+import re
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +17,7 @@ from noentenc.translation.models._seq2seq import Precision
 from noentenc.translation.models.m2m100 import M2M100Model, _drop_invalid_merges
 from noentenc.translation.models.nllb import NLLBModel
 from noentenc.translation.models.opus_mt import (
+    OPUS_MT_REVISIONS,
     OpusMTModel,
     _proto_field,
     _spm_precompiled_charsmap,
@@ -221,6 +224,47 @@ def test_resolve_files_reads_local_dir(tmp_path: Path) -> None:
     }
     with pytest.raises(FileNotFoundError, match="tokenizer.json"):
         resolve_files(tmp_path, ["config.json", "tokenizer.json"])
+
+
+@pytest.mark.parametrize(
+    ("make", "repo", "revision"),
+    [
+        (
+            lambda: OpusMTModel.from_pair(ES, EN),
+            "Xenova/opus-mt-es-en",
+            OPUS_MT_REVISIONS[ES, EN],
+        ),
+        (SMaLL100Model, SMaLL100Model.default_model, SMaLL100Model.default_revision),
+        (M2M100Model, M2M100Model.default_model, M2M100Model.default_revision),
+        (
+            lambda: M2M100Model("me/m2m100-finetune", revision="abc123"),
+            "me/m2m100-finetune",
+            "abc123",
+        ),
+    ],
+)
+def test_downloads_are_pinned(
+    monkeypatch: pytest.MonkeyPatch,
+    make: Callable[[], object],
+    repo: str,
+    revision: str,
+) -> None:
+    calls: list[tuple[str | Path, str | None]] = []
+
+    def fake_resolve(
+        model: str | Path, *_args: object, revision: str | None = None
+    ) -> dict[str, Path]:
+        calls.append((model, revision))
+        raise StopIteration
+
+    monkeypatch.setattr(_seq2seq, "resolve_files", fake_resolve)
+    with pytest.raises(StopIteration):
+        make()
+    assert calls == [(repo, revision)]
+
+
+def test_opus_pairs_are_pinned_to_commits() -> None:
+    assert all(re.fullmatch("[0-9a-f]{40}", r) for r in OPUS_MT_REVISIONS.values())
 
 
 def test_m2m100_drops_merges_outside_the_vocab() -> None:

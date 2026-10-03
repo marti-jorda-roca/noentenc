@@ -1,12 +1,7 @@
 """Google CLD3 backend: a tiny feed-forward network over character n-grams (107 languages)."""
 
 from noentenc.language_detection._optional import require
-from noentenc.language_detection.labels import (
-    UNDETERMINED,
-    LabelMapper,
-    normalize_scores,
-    to_iso639_3,
-)
+from noentenc.language_detection.labels import UNDETERMINED
 from noentenc.language_detection.models.base import BaseModel
 
 CLD3_LANGUAGES = (  # noqa: SIM905 - a word list reads better than 107 quoted strings
@@ -42,22 +37,7 @@ class Cld3Model(BaseModel):
         self._identifier = gcld3.NNetLanguageIdentifier(
             min_num_bytes=0, max_num_bytes=max_num_bytes
         )
-        self._mapper = LabelMapper(
-            CLD3_LANGUAGES,
-            normalize=normalize_labels,
-            collapse_macrolanguages=collapse_macrolanguages,
-        )
-
-    @property
-    def labels(self) -> list[str]:
-        return list(self._mapper.labels)
-
-    def _label(self, code: str) -> str:
-        if code == UNDETERMINED:
-            return code
-        if not self.normalize_labels:
-            return code
-        return to_iso639_3(code, collapse_macrolanguages=self.collapse_macrolanguages)
+        self._mapper = self._label_mapper(CLD3_LANGUAGES)
 
     def _predict_chunk(self, texts: list[str]) -> list[str]:
         return [
@@ -76,11 +56,7 @@ class Cld3Model(BaseModel):
             raw = {
                 r.language: r.probability for r in found if r.language != UNDETERMINED
             }
-            scores = normalize_scores(
-                raw,
-                normalize=self.normalize_labels,
-                collapse_macrolanguages=self.collapse_macrolanguages,
-            )
+            scores = self._normalize_scores(raw)
             results.append(
                 dict(sorted(scores.items(), key=lambda kv: -kv[1]))
                 or {UNDETERMINED: 1.0}

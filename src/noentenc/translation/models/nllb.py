@@ -219,24 +219,15 @@ class NLLBModel(Seq2SeqModel):
 
     schema = LanguageSchema(source=_LANGUAGES, target=_LANGUAGES)
     default_model: ClassVar[str] = "Xenova/nllb-200-distilled-600M"
+    default_revision: ClassVar[str] = "261c31d1a5732c67cdd16d80e8d6088507c7ccea"
     default_precision: ClassVar[Precision] = Precision.Q4
-    onnx_files: ClassVar[dict[Precision, tuple[str, str]]] = {
-        Precision.FP32: ("onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx"),
-        Precision.INT8: (
-            "onnx/encoder_model_quantized.onnx",
-            "onnx/decoder_model_merged_quantized.onnx",
-        ),
-        Precision.Q4: (
-            "onnx/encoder_model_q4.onnx",
-            "onnx/decoder_model_merged_q4.onnx",
-        ),
-    }
 
     def __init__(
         self,
         model: str | Path | None = None,
         only_local_files: bool = False,
         *,
+        revision: str | None = None,
         precision: Precision | str | None = None,
         num_threads: int | None = None,
     ) -> None:
@@ -246,7 +237,11 @@ class NLLBModel(Seq2SeqModel):
             stacklevel=2,
         )
         super().__init__(
-            model, only_local_files, precision=precision, num_threads=num_threads
+            model,
+            only_local_files,
+            revision=revision,
+            precision=precision,
+            num_threads=num_threads,
         )
 
     def _language_id(self, language: Language) -> int:

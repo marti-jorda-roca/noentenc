@@ -3,7 +3,7 @@ import polars as pl
 import pytest
 
 from noentenc.language_detection import LanguageDetector
-from noentenc.language_detection.models import fasttext as fasttext_pkg
+from noentenc.language_detection import base as detector_module
 from noentenc.language_detection.models.base import BaseModel
 from noentenc.language_detection.models.fasttext import FastTextModel
 from tests.unit.language_detection.helpers import FASTTEXT_FIXTURES
@@ -24,7 +24,7 @@ def test_default_model_is_lid176(monkeypatch: pytest.MonkeyPatch) -> None:
             created.append(model)
             super().__init__(TINY)
 
-    monkeypatch.setattr(fasttext_pkg, "FastTextModel", FakeFastText)
+    monkeypatch.setattr(detector_module, "FastTextModel", FakeFastText)
     detector = LanguageDetector()
     assert created == ["lid176"]
     assert isinstance(detector.model, BaseModel)

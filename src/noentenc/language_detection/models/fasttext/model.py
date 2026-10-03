@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 
 from noentenc.language_detection._download import RemoteFile, fetch
-from noentenc.language_detection.labels import LabelMapper
 from noentenc.language_detection.models.base import BaseModel
 from noentenc.language_detection.models.fasttext import format as ftz
 from noentenc.language_detection.models.fasttext.format import Loss
@@ -135,11 +134,7 @@ class FastTextModel(BaseModel):
         self._tokenizer = Tokenizer(weights, cache_size=cache_size)
         self._input = weights.input_matrix
         self._output = weights.output_matrix
-        self._mapper = LabelMapper(
-            weights.labels,
-            normalize=normalize_labels,
-            collapse_macrolanguages=collapse_macrolanguages,
-        )
+        self._mapper = self._label_mapper(weights.labels)
         if self.args.loss == Loss.HS:
             right, left = _hs_path_matrices(weights.label_counts)
             self._hs_internal = right.shape[0]
@@ -155,10 +150,6 @@ class FastTextModel(BaseModel):
                 f"{model!r} is neither a fastText preset ({', '.join(PRESETS)}) nor a file"
             )
         return path
-
-    @property
-    def labels(self) -> list[str]:
-        return list(self._mapper.labels)
 
     def hidden(self, texts: list[str]) -> np.ndarray:
         """Mean input-matrix row of each text, shape ``(len(texts), dim)``.

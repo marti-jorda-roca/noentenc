@@ -3,16 +3,14 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
+from tokenizers import Tokenizer
 
+from noentenc._onnx import create_session, pad
 from noentenc.language_detection._download import RemoteFile, fetch
-from noentenc.language_detection._optional import require
-from noentenc.language_detection.labels import LabelMapper
 from noentenc.language_detection.models.base import BaseModel
-
-ONNX_EXTRA = "onnx"
 
 
 @dataclass(frozen=True)
@@ -73,30 +71,18 @@ class OnnxClassifierModel(BaseModel):
         super().__init__(
             model, only_local_files, normalize_labels, collapse_macrolanguages
         )
-        ort = require("onnxruntime", ONNX_EXTRA)
-        tokenizers = require("tokenizers", ONNX_EXTRA)
         onnx_path, tokenizer_path, config_path = self._resolve(model, only_local_files)
 
         config = json.loads(config_path.read_text(encoding="utf-8"))
         id2label = config["id2label"]
         self.native_labels = [id2label[str(i)] for i in range(len(id2label))]
-        self._mapper = LabelMapper(
-            self.native_labels,
-            normalize=normalize_labels,
-            collapse_macrolanguages=collapse_macrolanguages,
-        )
+        self._mapper = self._label_mapper(self.native_labels)
         self._pad_id = int(config.get("pad_token_id") or 0)
 
-        self._tokenizer = tokenizers.Tokenizer.from_file(str(tokenizer_path))
+        self._tokenizer = Tokenizer.from_file(str(tokenizer_path))
         self._tokenizer.no_padding()
         self._tokenizer.enable_truncation(max_length=max_length)
-
-        options = ort.SessionOptions()
-        options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        options.intra_op_num_threads = num_threads or 0
-        self._session = ort.InferenceSession(
-            str(onnx_path), sess_options=options, providers=["CPUExecutionProvider"]
-        )
+        self._session = create_session(onnx_path, num_threads)
         self._input_names = {inp.name for inp in self._session.get_inputs()}
 
     @staticmethod
@@ -132,42 +118,31 @@ class OnnxClassifierModel(BaseModel):
             )
         return onnx_path, root / "tokenizer.json", root / "config.json"
 
-    @property
-    def labels(self) -> list[str]:
-        return list(self._mapper.labels)
-
     def logits(self, texts: list[str]) -> np.ndarray:
-        encodings = self._tokenizer.encode_batch(texts)
-        width = max(len(enc.ids) for enc in encodings)
-        input_ids = np.full((len(texts), width), self._pad_id, dtype=np.int64)
-        attention_mask = np.zeros((len(texts), width), dtype=np.int64)
-        for row, enc in enumerate(encodings):
-            input_ids[row, : len(enc.ids)] = enc.ids
-            attention_mask[row, : len(enc.ids)] = 1
+        input_ids, attention_mask = pad(
+            [enc.ids for enc in self._tokenizer.encode_batch(texts)], self._pad_id
+        )
         feeds: dict[str, Any] = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
         }
         if "token_type_ids" in self._input_names:
             feeds["token_type_ids"] = np.zeros_like(input_ids)
-        return self._session.run(
+        outputs = self._session.run(
             None, {k: v for k, v in feeds.items() if k in self._input_names}
-        )[0]
+        )
+        return cast("np.ndarray", outputs[0])
+
+    def _scores(self, texts: list[str]) -> np.ndarray:
+        return self._mapper.reduce(_softmax(self.logits(texts)))
 
     def _predict_chunk(self, texts: list[str]) -> list[str]:
-        logits = self.logits(texts)
-        if self._mapper.identity:
-            return self._mapper.top_label(logits.argmax(axis=1))
-        return self._mapper.top_label(
-            self._mapper.reduce(_softmax(logits)).argmax(axis=1)
-        )
+        return self._mapper.top_label(self._scores(texts).argmax(axis=1))
 
     def _predict_score_chunk(
         self, texts: list[str], top_k: int | None
     ) -> list[dict[str, float]]:
-        return self._mapper.to_dicts(
-            self._mapper.reduce(_softmax(self.logits(texts))), top_k
-        )
+        return self._mapper.to_dicts(self._scores(texts), top_k)
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:

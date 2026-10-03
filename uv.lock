@@ -379,10 +379,8 @@ all = [
     { name = "langdetect" },
     { name = "langid" },
     { name = "lingua-language-detector" },
-    { name = "onnxruntime" },
     { name = "pandas" },
     { name = "polars" },
-    { name = "tokenizers" },
 ]
 cld3 = [
     { name = "cld3-py" },
@@ -398,10 +396,6 @@ langid = [
 ]
 lingua = [
     { name = "lingua-language-detector" },
-]
-onnx = [
-    { name = "onnxruntime" },
-    { name = "tokenizers" },
 ]
 pandas = [
     { name = "pandas" },
@@ -431,16 +425,14 @@ requires-dist = [
     { name = "langdetect", marker = "extra == 'langdetect'", specifier = ">=1.0.9" },
     { name = "langid", marker = "extra == 'langid'", specifier = ">=1.1.6" },
     { name = "lingua-language-detector", marker = "extra == 'lingua'", specifier = ">=2.2" },
-    { name = "noentenc", extras = ["pandas", "polars", "onnx", "lingua", "cld3", "heliport", "langid", "langdetect"], marker = "extra == 'all'" },
+    { name = "noentenc", extras = ["pandas", "polars", "lingua", "cld3", "heliport", "langid", "langdetect"], marker = "extra == 'all'" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "onnxruntime", specifier = ">=1.30.0" },
-    { name = "onnxruntime", marker = "extra == 'onnx'", specifier = ">=1.30" },
     { name = "pandas", marker = "extra == 'pandas'", specifier = ">=3.0.6" },
     { name = "polars", marker = "extra == 'polars'", specifier = ">=1.44.2" },
     { name = "tokenizers", specifier = ">=0.23.2" },
-    { name = "tokenizers", marker = "extra == 'onnx'", specifier = ">=0.23" },
 ]
-provides-extras = ["pandas", "polars", "onnx", "lingua", "cld3", "heliport", "langid", "langdetect", "all"]
+provides-extras = ["pandas", "polars", "lingua", "cld3", "heliport", "langid", "langdetect", "all"]
 
 [package.metadata.requires-dev]
 dev = [

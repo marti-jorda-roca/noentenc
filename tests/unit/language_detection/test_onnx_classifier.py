@@ -1,7 +1,10 @@
 from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 import pytest
+from onnxruntime import InferenceSession
+from tokenizers import Tokenizer
 
 from noentenc.language_detection.labels import LabelMapper
 from noentenc.language_detection.models.onnx_classifier import OnnxClassifierModel
@@ -28,9 +31,9 @@ def _fake_model(input_names: set[str]) -> tuple[OnnxClassifierModel, _FakeSessio
     model.normalize_labels, model.collapse_macrolanguages = True, False
     model._mapper = LabelMapper(["en", "es"])
     model._pad_id = 9
-    model._tokenizer = _FakeTokenizer()
+    model._tokenizer = cast("Tokenizer", _FakeTokenizer())
     session = _FakeSession()
-    model._session = session
+    model._session = cast("InferenceSession", session)
     model._input_names = input_names
     return model, session
 

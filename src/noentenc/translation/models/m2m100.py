@@ -29,18 +29,8 @@ class M2M100Model(Seq2SeqModel):
 
     schema = LanguageSchema(source=_LANGUAGES, target=_LANGUAGES)
     default_model: ClassVar[str] = "Xenova/m2m100_418M"
+    default_revision: ClassVar[str] = "9c374f0b7aca709787cea97b047bfbbd1559d177"
     default_precision: ClassVar[Precision] = Precision.Q4
-    onnx_files: ClassVar[dict[Precision, tuple[str, str]]] = {
-        Precision.FP32: ("onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx"),
-        Precision.INT8: (
-            "onnx/encoder_model_quantized.onnx",
-            "onnx/decoder_model_merged_quantized.onnx",
-        ),
-        Precision.Q4: (
-            "onnx/encoder_model_q4.onnx",
-            "onnx/decoder_model_merged_q4.onnx",
-        ),
-    }
 
     def _load_tokenizer(self, files: dict[str, Path]) -> Tokenizer:
         try:

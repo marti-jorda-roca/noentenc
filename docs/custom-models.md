@@ -92,7 +92,7 @@ Rules every backend follows:
 
 ## 3. A new translation model
 
-Subclass `noentenc.translation.models.base.BaseModel`, declare a `schema` and implement `predict` and `predict_batch`:
+Subclass `noentenc.translation.models.base.BaseModel`, declare a `schema` and implement `predict_batch` (`predict` calls it with one text):
 
 ```python
 from noentenc import ANY_LANGUAGE, Language, LanguageSchema
@@ -110,14 +110,6 @@ class MyServiceModel(BaseModel):
     def __init__(self, client: MyClient) -> None:
         super().__init__("my-service")
         self.client = client
-
-    def predict(
-        self,
-        text: str,
-        target_language: Language,
-        source_language: Language | None = None,
-    ) -> str:
-        return self.predict_batch([text], target_language, source_language)[0]
 
     def predict_batch(
         self,
@@ -171,15 +163,9 @@ class MBart50Model(Seq2SeqModel):
 
     schema = LanguageSchema(source=_LANGUAGES, target=_LANGUAGES)
     default_model: ClassVar[str] = "Xenova/mbart-large-50-many-to-many-mmt"
+    # The commit of `default_model` to download (see the repo's "History" tab).
+    default_revision: ClassVar[str] = "<commit sha>"
     default_precision: ClassVar[Precision] = Precision.INT8
-    # (encoder, decoder) paths inside the repo. Check the repo's file list.
-    onnx_files: ClassVar[dict[Precision, tuple[str, str]]] = {
-        Precision.FP32: ("onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx"),
-        Precision.INT8: (
-            "onnx/encoder_model_quantized.onnx",
-            "onnx/decoder_model_merged_quantized.onnx",
-        ),
-    }
 
     def _frame(
         self, ids: list[int], source: Language | None, target: Language
@@ -204,6 +190,7 @@ The hooks you can override:
 | `_forced_first_id(target)` | `None` | The decoder must start with a target-language token (M2M100, NLLB, mBART). |
 | `_banned_ids()` | `()` | Some token must never be generated (Marian bans `<pad>`). |
 | `_load_tokenizer(files)` | `Tokenizer.from_file("tokenizer.json")` | The tokenizer needs patching (see `OpusMTModel`, `M2M100Model`). |
+| `onnx_files` | `XENOVA_ONNX_FILES` (fp32, int8, q4) | The repo names its (encoder, decoder) files differently (see `SMaLL100Model`). |
 | `extra_files` | `()` | The model needs more files from the repo, such as `source.spm`. |
 
 The engine expects a merged decoder (`decoder_model_merged*.onnx`) with `use_cache_branch` and `past_key_values.*` inputs. That's what `optimum-cli export onnx --task text2text-generation-with-past` produces. Exports with a separate `decoder_with_past_model.onnx` won't load.
@@ -216,7 +203,7 @@ To ship a new model in the package rather than in your own code:
 
 1. **Put it in its own file**, `models/<name>.py`, in `language_detection/` or `translation/`, and export it from the package `__init__.py`.
 2. **Use `Language` for every language parameter** and declare a `schema` (translation). Unsupported languages must raise.
-3. **Pin presets.** Downloaded weights use a fixed Hugging Face revision and, for files we fetch ourselves, a sha256 (see `FastTextPreset` and `OnnxPreset`). Weights are never bundled in the wheel.
+3. **Pin presets.** Downloaded weights use a fixed Hugging Face revision (`default_revision`, `OPUS_MT_REVISIONS`) and, for files we fetch ourselves, a sha256 (see `FastTextPreset` and `OnnxPreset`). Weights are never bundled in the wheel.
 4. **Add optional dependencies as an extra** in `pyproject.toml`, and add the extra to `all`.
 5. **Write tests:**
    - Unit tests in `tests/unit/` that run without network, using a tiny fixture or a fake session (see `tests/unit/translation/test_models.py`).

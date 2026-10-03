@@ -4,8 +4,6 @@ from noentenc.language_detection._optional import require
 from noentenc.language_detection.labels import (
     NO_LINGUISTIC_CONTENT,
     UNDETERMINED,
-    LabelMapper,
-    to_iso639_3,
     valid_iso639_3_codes,
 )
 from noentenc.language_detection.models.base import BaseModel
@@ -47,21 +45,12 @@ class HeliportModel(BaseModel):
         native = sorted(
             {heliport_code(c) for c in self._identifier.get_confidence_all()}
         )
-        self._mapper = LabelMapper(
-            [*native, UNDETERMINED, NO_LINGUISTIC_CONTENT],
-            normalize=normalize_labels,
-            collapse_macrolanguages=collapse_macrolanguages,
+        self._mapper = self._label_mapper(
+            [*native, UNDETERMINED, NO_LINGUISTIC_CONTENT]
         )
 
-    @property
-    def labels(self) -> list[str]:
-        return list(self._mapper.labels)
-
-    def _label(self, raw: str) -> str:
-        code = heliport_code(raw)
-        if not self.normalize_labels:
-            return code
-        return to_iso639_3(code, collapse_macrolanguages=self.collapse_macrolanguages)
+    def _label(self, native: str) -> str:
+        return super()._label(heliport_code(native))
 
     def _scored(self, texts: list[str]) -> list[tuple[str, float]]:
         if len(texts) == 1:

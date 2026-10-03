@@ -14,6 +14,7 @@ class SMaLL100Model(M2M100Model):
 
     schema = LanguageSchema(source=ANY_LANGUAGE, target=frozenset(M2M100_CODES))
     default_model: ClassVar[str] = "casawolice/small100-onnx"
+    default_revision: ClassVar[str] = "5c2c73ac70bee9c58f5a7ac5e84a36bee25db8ee"
     default_precision: ClassVar[Precision] = Precision.INT8
     # This export only ships int8 weights, under the unsuffixed file names.
     onnx_files: ClassVar[dict[Precision, tuple[str, str]]] = {

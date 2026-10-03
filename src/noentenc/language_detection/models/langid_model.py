@@ -3,11 +3,6 @@
 from collections.abc import Iterable
 
 from noentenc.language_detection._optional import require
-from noentenc.language_detection.labels import (
-    LabelMapper,
-    normalize_scores,
-    to_iso639_3,
-)
 from noentenc.language_detection.models.base import BaseModel
 
 
@@ -34,20 +29,7 @@ class LangidModel(BaseModel):
         )
         if languages is not None:
             self._identifier.set_languages(list(languages))
-        self._mapper = LabelMapper(
-            list(self._identifier.nb_classes),
-            normalize=normalize_labels,
-            collapse_macrolanguages=collapse_macrolanguages,
-        )
-
-    @property
-    def labels(self) -> list[str]:
-        return list(self._mapper.labels)
-
-    def _label(self, code: str) -> str:
-        if not self.normalize_labels:
-            return code
-        return to_iso639_3(code, collapse_macrolanguages=self.collapse_macrolanguages)
+        self._mapper = self._label_mapper(self._identifier.nb_classes)
 
     def _predict_chunk(self, texts: list[str]) -> list[str]:
         return [self._label(self._identifier.classify(text)[0]) for text in texts]
@@ -55,14 +37,9 @@ class LangidModel(BaseModel):
     def _predict_score_chunk(
         self, texts: list[str], top_k: int | None
     ) -> list[dict[str, float]]:
-        results = []
-        for text in texts:
-            ranked = self._identifier.rank(text)[:top_k]  # sorted descending
-            results.append(
-                normalize_scores(
-                    {code: float(p) for code, p in ranked},
-                    normalize=self.normalize_labels,
-                    collapse_macrolanguages=self.collapse_macrolanguages,
-                )
+        return [
+            self._normalize_scores(
+                {code: float(p) for code, p in self._identifier.rank(text)[:top_k]}
             )
-        return results
+            for text in texts
+        ]

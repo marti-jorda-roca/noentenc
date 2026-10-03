@@ -77,14 +77,6 @@ class TranslationMemoryModel(TranslationModel):
         # Every model declares a schema; this one handles what its fallback handles.
         self.schema = fallback.schema
 
-    def predict(
-        self,
-        text: str,
-        target_language: Language,
-        source_language: Language | None = None,
-    ) -> str:
-        return self.predict_batch([text], target_language, source_language)[0]
-
     def predict_batch(
         self,
         texts: list[str],

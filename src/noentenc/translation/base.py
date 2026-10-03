@@ -1,5 +1,6 @@
-from typing import TYPE_CHECKING, cast, overload
+from typing import TYPE_CHECKING, overload
 
+from noentenc._dataframe import column_values, with_column
 from noentenc.languages import Language, UnsupportedLanguageError
 from noentenc.translation.models.base import BaseModel
 from noentenc.translation.models.opus_mt import OPUS_MT_PAIRS, OpusMTModel
@@ -75,12 +76,7 @@ class Translator:
 
         Works with polars and pandas frames; null texts stay null.
         """
-        module = type(dataset).__module__.split(".", 1)[0]
-        if module not in {"polars", "pandas"}:
-            raise TypeError(
-                f"expected a polars or pandas DataFrame, got {type(dataset).__name__}"
-            )
-        values = dataset[target_column].to_list()
+        values = column_values(dataset, target_column)
         rows = [i for i, value in enumerate(values) if isinstance(value, str)]
         translations = self.translate_batch(
             [values[i] for i in rows], target_language, source_language, batch_size
@@ -88,16 +84,7 @@ class Translator:
         results: list[str | None] = [None] * len(values)
         for i, translation in zip(rows, translations, strict=True):
             results[i] = translation
-
-        if module == "polars":
-            # The caller passed a polars frame, so polars is installed.
-            import polars
-
-            frame = cast("pl.DataFrame", dataset)
-            return frame.with_columns(
-                polars.Series(result_column, results, polars.String)
-            )
-        return cast("pd.DataFrame", dataset).assign(**{result_column: results})
+        return with_column(dataset, result_column, results, strings=True)
 
     def _model_for(self, source: Language | None, target: Language) -> BaseModel:
         if self.model is not None:

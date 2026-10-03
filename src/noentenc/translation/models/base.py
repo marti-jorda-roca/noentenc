@@ -1,4 +1,4 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 from noentenc.languages import Language, LanguageSchema
@@ -18,13 +18,13 @@ class BaseModel(ABC):
         target_language: Language,
         source_language: Language | None = None,
     ) -> str:
-        raise NotImplementedError
+        return self.predict_batch([text], target_language, source_language)[0]
 
+    @abstractmethod
     def predict_batch(
         self,
         texts: list[str],
         target_language: Language,
         source_language: Language | None = None,
         batch_size: int = 32,
-    ) -> list[str]:
-        raise NotImplementedError
+    ) -> list[str]: ...

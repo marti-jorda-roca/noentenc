@@ -49,14 +49,14 @@ def fetch(remote: RemoteFile, *, only_local_files: bool = False) -> Path:
     token = os.environ.get("HF_TOKEN")
     if token and remote.url.startswith("https://huggingface.co/"):
         headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(remote.url, headers=headers)  # noqa: S310 - URLs are https constants
+    request = urllib.request.Request(remote.url, headers=headers)
     digest = hashlib.sha256()
     with tempfile.NamedTemporaryFile(
         dir=target.parent, delete=False, suffix=".part"
     ) as tmp:
         tmp_path = Path(tmp.name)
         try:
-            with urllib.request.urlopen(request) as response:  # noqa: S310
+            with urllib.request.urlopen(request) as response:  # nosec B310 - https preset URLs
                 while chunk := response.read(_CHUNK):
                     digest.update(chunk)
                     tmp.write(chunk)

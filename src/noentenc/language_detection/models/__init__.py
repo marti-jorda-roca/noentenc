@@ -1,7 +1,7 @@
 """Language-identification backends.
 
-Only ``numpy`` is needed for ``FastTextModel``; the other backends import their optional
-dependency lazily, when they are constructed.
+``FastTextModel`` and ``OnnxClassifierModel`` use core dependencies only; the other backends
+import their optional dependency lazily, when they are constructed.
 """
 
 from noentenc.language_detection.models.base import BaseModel

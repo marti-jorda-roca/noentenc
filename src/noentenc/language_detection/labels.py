@@ -51,6 +51,15 @@ def to_iso639_3(label: str, *, collapse_macrolanguages: bool = False) -> str:
     return code
 
 
+def normalize_label(
+    label: str, *, normalize: bool = True, collapse_macrolanguages: bool = False
+) -> str:
+    """``to_iso639_3(label)``, or with ``normalize=False`` the label minus fastText's prefix."""
+    if not normalize:
+        return label.removeprefix(FASTTEXT_LABEL_PREFIX)
+    return to_iso639_3(label, collapse_macrolanguages=collapse_macrolanguages)
+
+
 @cache
 def valid_iso639_3_codes() -> frozenset[str]:
     """Every current ISO 639-3 code, plus ``und`` and ``zxx``."""
@@ -72,13 +81,14 @@ class LabelMapper:
         collapse_macrolanguages: bool = False,
     ) -> None:
         self.native_labels = list(native_labels)
-        if normalize:
-            mapped = [
-                to_iso639_3(lab, collapse_macrolanguages=collapse_macrolanguages)
-                for lab in native_labels
-            ]
-        else:
-            mapped = [lab.removeprefix(FASTTEXT_LABEL_PREFIX) for lab in native_labels]
+        mapped = [
+            normalize_label(
+                lab,
+                normalize=normalize,
+                collapse_macrolanguages=collapse_macrolanguages,
+            )
+            for lab in native_labels
+        ]
         # One-to-one mappings keep the native label order, so scores need no reshuffling.
         self.identity = len(set(mapped)) == len(mapped)
         self.labels: list[str] = mapped if self.identity else sorted(set(mapped))
@@ -128,10 +138,8 @@ def normalize_scores(
     """Normalise the keys of a ``{native label: score}`` mapping, summing scores of labels that collapse."""
     out: dict[str, float] = {}
     for label, score in scores.items():
-        key = (
-            to_iso639_3(label, collapse_macrolanguages=collapse_macrolanguages)
-            if normalize
-            else label.removeprefix(FASTTEXT_LABEL_PREFIX)
+        key = normalize_label(
+            label, normalize=normalize, collapse_macrolanguages=collapse_macrolanguages
         )
         out[key] = out.get(key, 0.0) + score
     return out
