@@ -1,0 +1,43 @@
+Hello, how are you today?
+The quick brown fox jumps over the lazy dog.
+Bon dia a tothom, com esteu?
+M'agrada molt passejar per la platja a l'estiu.
+Hola, ¿cómo estás? Espero que todo vaya bien.
+El tren llega a las nueve de la mañana.
+Bonjour tout le monde, comment ça va ?
+Je voudrais un café, s'il vous plaît.
+Das ist ein Test, um die Sprache zu erkennen.
+Ich habe heute keine Zeit, leider.
+Questo è un esempio di frase in italiano.
+Obrigado pela ajuda, foi muito útil.
+Dit is een Nederlandse zin over fietsen.
+Det här är en mening på svenska.
+Dette er en sætning på dansk.
+To jest zdanie w języku polskim.
+Tohle je věta v češtině.
+Ez egy magyar mondat.
+Bu bir Türkçe cümledir.
+Привет, как дела? Всё хорошо.
+Це речення українською мовою.
+Αυτή είναι μια πρόταση στα ελληνικά.
+هذه جملة باللغة العربية.
+זה משפט בעברית.
+यह हिंदी में एक वाक्य है।
+এটি বাংলায় একটি বাক্য।
+これは日本語の文です。
+这是一个中文句子。
+這是一個繁體中文句子。
+이것은 한국어 문장입니다.
+นี่คือประโยคภาษาไทย
+Đây là một câu tiếng Việt.
+Ini adalah kalimat dalam bahasa Indonesia.
+Hii ni sentensi ya Kiswahili.
+ok
+Paris
+😀🎉👍
+12345 67890
+mixed English y español en la misma frase
+non breaking space test
+tabs	and	other	whitespace	here
+__label__en this token looks like a label
+Supercalifragilisticexpialidocious antidisestablishmentarianism pneumonoultramicroscopicsilicovolcanoconiosis

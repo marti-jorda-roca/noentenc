@@ -1,0 +1,115 @@
+[project]
+name = "noentenc"
+version = "0.1.0"
+description = "Lightweight, CPU-only language detection (and, soon, translation) for Python. The core depends only on numpy. Other backends are optional extras."
+readme = "README.md"
+authors = [
+    { name = "marti-jorda-roca", email = "mjorda98@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "huggingface-hub>=1.33.0",
+    "numpy>=2.0",
+    "onnxruntime>=1.30.0",
+    "tokenizers>=0.23.2",
+]
+
+[project.optional-dependencies]
+pandas = ["pandas>=3.0.6"]
+polars = ["polars>=1.44.2"]
+onnx = ["onnxruntime>=1.30", "tokenizers>=0.23"]
+lingua = ["lingua-language-detector>=2.2"]
+cld3 = ["cld3-py>=3.1"]
+heliport = ["heliport>=1.0.1; sys_platform != 'win32'"]
+langid = ["langid>=1.1.6"]
+langdetect = ["langdetect>=1.0.9"]
+all = ["noentenc[pandas,polars,onnx,lingua,cld3,heliport,langid,langdetect]"]
+
+[project.scripts]
+noentenc = "noentenc:main"
+
+[build-system]
+requires = ["uv_build>=0.12.22,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "bandit[toml]>=1.9.4",
+    "coverage>=7.16.2",
+    "library-skills>=0.0.19",
+    "pandas>=3.0.6",
+    "polars>=1.44.2",
+    "prek>=0.5.4",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+    "ty>=0.0.84",
+]
+
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG001", # unused arguments in functions
+    "T201",   # print statements are not allowed,
+    "C90", # cyclomatic complexity
+    "PLR", # pylint-style size limits
+    "ERA",   # Commented-out code
+    "SIM",   # Simplifiable/redundant constructs
+    "RET",   # Redundant return patterns
+    "PIE",   # Miscellaneous unnecessary code
+    "B",     # Bugbear, including duplicate/redundant constructs
+    "ANN",   # Missing annotations and explicit Any checks
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "W191",  # indentation contains tabs
+    "B904",  # Allow raising exceptions without from e
+    "PLR0913", # Too many arguments
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Magic values are the point in tests and one-off scripts; only library code must name them.
+# Examples print results and show expected output in comments.
+"docs/examples/**/*.py" = ["PLR2004", "T201", "ERA001"]
+"projects/*/tests/**/*.py" = ["PLR2004"]
+"scripts/**/*.py" = ["PLR2004", "T201"]
+"tests/**/*.py" = ["PLR2004"]
+
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-branches = 12
+max-returns = 6
+max-statements = 50
+max-args = 8
+max-nested-blocks = 5
+
+[tool.ty.terminal]
+error-on-warning = true
+
+[tool.ty.src]
+include = ["src", "tests", "docs"]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+# Projects share test module basenames (e.g. test_train_model.py); importlib mode
+# gives each file a unique module name instead of colliding on sys.modules.
+importmode = "importlib"
+consider_namespace_packages = true
+markers = [
+    "integration: needs real model weights (downloads them); run with NOENTENC_RUN_INTEGRATION=1",
+]

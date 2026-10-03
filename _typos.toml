@@ -1,0 +1,24 @@
+[files]
+extend-exclude = [
+  # Generated ISO 639 tables: every 3-letter code is a potential "typo"
+  "src/noentenc/language_detection/_iso639.py",
+  # Model label dumps and multilingual sample sentences
+  "tests/unit/language_detection/fixtures/",
+]
+
+[default]
+extend-ignore-re = [
+  # Language/script codes like "tha_Thai", "asm_Beng"
+  "\\b[a-z]{2,3}_[A-Z][a-z]{3}\\b",
+  # fastText labels like "__label__als"
+  "__label__[a-z]{2,3}\\b",
+]
+
+[default.extend-words]
+# False positive rate (ML metric)
+fpr = "fpr"
+# ISO 639 codes used as identifiers/values
+ba = "ba"
+fo = "fo"
+als = "als"
+tha = "tha"

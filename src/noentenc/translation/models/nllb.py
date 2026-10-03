@@ -1,0 +1,263 @@
+import warnings
+from pathlib import Path
+from typing import ClassVar
+
+from noentenc.languages import Language, LanguageSchema
+from noentenc.translation.models._seq2seq import Precision, Seq2SeqModel
+
+L = Language
+
+# FLORES-200 code for each supported language. Languages written in several
+# scripts map to their most common one.
+NLLB_CODES: dict[Language, str] = {
+    L.ACEHNESE: "ace_Latn",
+    L.MESOPOTAMIAN_ARABIC: "acm_Arab",
+    L.TAIZZI_ADENI_ARABIC: "acq_Arab",
+    L.TUNISIAN_ARABIC: "aeb_Arab",
+    L.AFRIKAANS: "afr_Latn",
+    L.SOUTH_LEVANTINE_ARABIC: "ajp_Arab",
+    L.AKAN: "aka_Latn",
+    L.AMHARIC: "amh_Ethi",
+    L.NORTH_LEVANTINE_ARABIC: "apc_Arab",
+    L.ARABIC: "arb_Arab",
+    L.NAJDI_ARABIC: "ars_Arab",
+    L.MOROCCAN_ARABIC: "ary_Arab",
+    L.EGYPTIAN_ARABIC: "arz_Arab",
+    L.ASSAMESE: "asm_Beng",
+    L.ASTURIAN: "ast_Latn",
+    L.AWADHI: "awa_Deva",
+    L.AYMARA: "ayr_Latn",
+    L.SOUTH_AZERBAIJANI: "azb_Arab",
+    L.AZERBAIJANI: "azj_Latn",
+    L.BASHKIR: "bak_Cyrl",
+    L.BAMBARA: "bam_Latn",
+    L.BALINESE: "ban_Latn",
+    L.BELARUSIAN: "bel_Cyrl",
+    L.BEMBA: "bem_Latn",
+    L.BENGALI: "ben_Beng",
+    L.BHOJPURI: "bho_Deva",
+    L.BANJAR: "bjn_Latn",
+    L.TIBETAN: "bod_Tibt",
+    L.BOSNIAN: "bos_Latn",
+    L.BUGINESE: "bug_Latn",
+    L.BULGARIAN: "bul_Cyrl",
+    L.CATALAN: "cat_Latn",
+    L.CEBUANO: "ceb_Latn",
+    L.CZECH: "ces_Latn",
+    L.CHOKWE: "cjk_Latn",
+    L.CENTRAL_KURDISH: "ckb_Arab",
+    L.CRIMEAN_TATAR: "crh_Latn",
+    L.WELSH: "cym_Latn",
+    L.DANISH: "dan_Latn",
+    L.GERMAN: "deu_Latn",
+    L.DINKA: "dik_Latn",
+    L.DYULA: "dyu_Latn",
+    L.DZONGKHA: "dzo_Tibt",
+    L.GREEK: "ell_Grek",
+    L.ENGLISH: "eng_Latn",
+    L.ESPERANTO: "epo_Latn",
+    L.ESTONIAN: "est_Latn",
+    L.BASQUE: "eus_Latn",
+    L.EWE: "ewe_Latn",
+    L.FAROESE: "fao_Latn",
+    L.PERSIAN: "pes_Arab",
+    L.FIJIAN: "fij_Latn",
+    L.FINNISH: "fin_Latn",
+    L.FON: "fon_Latn",
+    L.FRENCH: "fra_Latn",
+    L.FRIULIAN: "fur_Latn",
+    L.FULA: "fuv_Latn",
+    L.SCOTTISH_GAELIC: "gla_Latn",
+    L.IRISH: "gle_Latn",
+    L.GALICIAN: "glg_Latn",
+    L.GUARANI: "grn_Latn",
+    L.GUJARATI: "guj_Gujr",
+    L.HAITIAN_CREOLE: "hat_Latn",
+    L.HAUSA: "hau_Latn",
+    L.HEBREW: "heb_Hebr",
+    L.HINDI: "hin_Deva",
+    L.CHHATTISGARHI: "hne_Deva",
+    L.CROATIAN: "hrv_Latn",
+    L.HUNGARIAN: "hun_Latn",
+    L.ARMENIAN: "hye_Armn",
+    L.IGBO: "ibo_Latn",
+    L.ILOCANO: "ilo_Latn",
+    L.INDONESIAN: "ind_Latn",
+    L.ICELANDIC: "isl_Latn",
+    L.ITALIAN: "ita_Latn",
+    L.JAVANESE: "jav_Latn",
+    L.JAPANESE: "jpn_Jpan",
+    L.KABYLE: "kab_Latn",
+    L.JINGPHO: "kac_Latn",
+    L.KAMBA: "kam_Latn",
+    L.KANNADA: "kan_Knda",
+    L.KASHMIRI: "kas_Arab",
+    L.GEORGIAN: "kat_Geor",
+    L.KANURI: "knc_Latn",
+    L.KAZAKH: "kaz_Cyrl",
+    L.KABIYE: "kbp_Latn",
+    L.KABUVERDIANU: "kea_Latn",
+    L.KHMER: "khm_Khmr",
+    L.KIKUYU: "kik_Latn",
+    L.KINYARWANDA: "kin_Latn",
+    L.KYRGYZ: "kir_Cyrl",
+    L.KIMBUNDU: "kmb_Latn",
+    L.KIKONGO: "kon_Latn",
+    L.KOREAN: "kor_Hang",
+    L.KURDISH: "kmr_Latn",
+    L.LAO: "lao_Laoo",
+    L.LATVIAN: "lvs_Latn",
+    L.LIGURIAN: "lij_Latn",
+    L.LIMBURGISH: "lim_Latn",
+    L.LINGALA: "lin_Latn",
+    L.LITHUANIAN: "lit_Latn",
+    L.LOMBARD: "lmo_Latn",
+    L.LATGALIAN: "ltg_Latn",
+    L.LUXEMBOURGISH: "ltz_Latn",
+    L.LUBA_KASAI: "lua_Latn",
+    L.GANDA: "lug_Latn",
+    L.LUO: "luo_Latn",
+    L.MIZO: "lus_Latn",
+    L.MAGAHI: "mag_Deva",
+    L.MAITHILI: "mai_Deva",
+    L.MALAYALAM: "mal_Mlym",
+    L.MARATHI: "mar_Deva",
+    L.MINANGKABAU: "min_Latn",
+    L.MACEDONIAN: "mkd_Cyrl",
+    L.MALAGASY: "plt_Latn",
+    L.MALTESE: "mlt_Latn",
+    L.MEITEI: "mni_Beng",
+    L.MONGOLIAN: "khk_Cyrl",
+    L.MOSSI: "mos_Latn",
+    L.MAORI: "mri_Latn",
+    L.MALAY: "zsm_Latn",
+    L.BURMESE: "mya_Mymr",
+    L.DUTCH: "nld_Latn",
+    L.NORWEGIAN_NYNORSK: "nno_Latn",
+    L.NORWEGIAN: "nob_Latn",
+    L.NEPALI: "npi_Deva",
+    L.NORTHERN_SOTHO: "nso_Latn",
+    L.NUER: "nus_Latn",
+    L.CHICHEWA: "nya_Latn",
+    L.OCCITAN: "oci_Latn",
+    L.OROMO: "gaz_Latn",
+    L.ODIA: "ory_Orya",
+    L.PANGASINAN: "pag_Latn",
+    L.PUNJABI: "pan_Guru",
+    L.PAPIAMENTO: "pap_Latn",
+    L.POLISH: "pol_Latn",
+    L.PORTUGUESE: "por_Latn",
+    L.DARI: "prs_Arab",
+    L.PASHTO: "pbt_Arab",
+    L.QUECHUA: "quy_Latn",
+    L.ROMANIAN: "ron_Latn",
+    L.KIRUNDI: "run_Latn",
+    L.RUSSIAN: "rus_Cyrl",
+    L.SANGO: "sag_Latn",
+    L.SANSKRIT: "san_Deva",
+    L.SANTALI: "sat_Beng",
+    L.SICILIAN: "scn_Latn",
+    L.SHAN: "shn_Mymr",
+    L.SINHALA: "sin_Sinh",
+    L.SLOVAK: "slk_Latn",
+    L.SLOVENIAN: "slv_Latn",
+    L.SAMOAN: "smo_Latn",
+    L.SHONA: "sna_Latn",
+    L.SINDHI: "snd_Arab",
+    L.SOMALI: "som_Latn",
+    L.SOUTHERN_SOTHO: "sot_Latn",
+    L.SPANISH: "spa_Latn",
+    L.ALBANIAN: "als_Latn",
+    L.SARDINIAN: "srd_Latn",
+    L.SERBIAN: "srp_Cyrl",
+    L.SWATI: "ssw_Latn",
+    L.SUNDANESE: "sun_Latn",
+    L.SWEDISH: "swe_Latn",
+    L.SWAHILI: "swh_Latn",
+    L.SILESIAN: "szl_Latn",
+    L.TAMIL: "tam_Taml",
+    L.TATAR: "tat_Cyrl",
+    L.TELUGU: "tel_Telu",
+    L.TAJIK: "tgk_Cyrl",
+    L.TAGALOG: "tgl_Latn",
+    L.THAI: "tha_Thai",
+    L.TIGRINYA: "tir_Ethi",
+    L.TAMASHEQ: "taq_Latn",
+    L.TOK_PISIN: "tpi_Latn",
+    L.TSWANA: "tsn_Latn",
+    L.TSONGA: "tso_Latn",
+    L.TURKMEN: "tuk_Latn",
+    L.TUMBUKA: "tum_Latn",
+    L.TURKISH: "tur_Latn",
+    L.TWI: "twi_Latn",
+    L.CENTRAL_ATLAS_TAMAZIGHT: "tzm_Tfng",
+    L.UYGHUR: "uig_Arab",
+    L.UKRAINIAN: "ukr_Cyrl",
+    L.UMBUNDU: "umb_Latn",
+    L.URDU: "urd_Arab",
+    L.UZBEK: "uzn_Latn",
+    L.VENETIAN: "vec_Latn",
+    L.VIETNAMESE: "vie_Latn",
+    L.WARAY: "war_Latn",
+    L.WOLOF: "wol_Latn",
+    L.XHOSA: "xho_Latn",
+    L.YIDDISH: "ydd_Hebr",
+    L.YORUBA: "yor_Latn",
+    L.CANTONESE: "yue_Hant",
+    L.CHINESE: "zho_Hans",
+    L.ZULU: "zul_Latn",
+}
+
+_LANGUAGES = frozenset(NLLB_CODES)
+
+
+class NLLBModel(Seq2SeqModel):
+    """Meta NLLB-200 distilled 600M: any pair among ~200 languages.
+
+    Licensed CC-BY-NC-4.0 (non-commercial), so it is never picked by default.
+    """
+
+    schema = LanguageSchema(source=_LANGUAGES, target=_LANGUAGES)
+    default_model: ClassVar[str] = "Xenova/nllb-200-distilled-600M"
+    default_precision: ClassVar[Precision] = Precision.Q4
+    onnx_files: ClassVar[dict[Precision, tuple[str, str]]] = {
+        Precision.FP32: ("onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx"),
+        Precision.INT8: (
+            "onnx/encoder_model_quantized.onnx",
+            "onnx/decoder_model_merged_quantized.onnx",
+        ),
+        Precision.Q4: (
+            "onnx/encoder_model_q4.onnx",
+            "onnx/decoder_model_merged_q4.onnx",
+        ),
+    }
+
+    def __init__(
+        self,
+        model: str | Path | None = None,
+        only_local_files: bool = False,
+        *,
+        precision: Precision | str | None = None,
+        num_threads: int | None = None,
+    ) -> None:
+        warnings.warn(
+            "NLLB-200 is licensed CC-BY-NC-4.0: non-commercial use only.",
+            UserWarning,
+            stacklevel=2,
+        )
+        super().__init__(
+            model, only_local_files, precision=precision, num_threads=num_threads
+        )
+
+    def _language_id(self, language: Language) -> int:
+        return self._token_id(NLLB_CODES[language])
+
+    def _frame(
+        self, ids: list[int], source: Language | None, target: Language
+    ) -> list[int]:
+        if source is None:  # already rejected by `schema`; narrows the type
+            raise ValueError("NLLB requires a source language")
+        return [self._language_id(source), *ids, self.config["eos_token_id"]]
+
+    def _forced_first_id(self, target: Language) -> int | None:
+        return self._language_id(target)
