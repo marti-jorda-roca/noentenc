@@ -7,6 +7,11 @@ authors = [
     { name = "marti-jorda-roca", email = "mjorda98@gmail.com" }
 ]
 requires-python = ">=3.14"
+license = "Apache-2.0"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
     "huggingface-hub>=1.33.0",
     "numpy>=2.0",

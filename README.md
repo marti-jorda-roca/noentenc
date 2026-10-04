@@ -5,6 +5,12 @@
     <img src="docs/assets/logo-light.svg" alt="noentenc" width="520">
   </picture>
   <p>Language detection and machine translation for Python, on CPU, without torch.</p>
+  <p>
+    <a href="https://github.com/marti-jorda-roca/noentenc/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/marti-jorda-roca/noentenc/ci.yml?style=flat-square&branch=main" /></a>
+    <a href="https://pypi.org/project/noentenc/"><img alt="PyPI" src="https://img.shields.io/pypi/v/noentenc?style=flat-square" /></a>
+    <a href="https://pypi.org/project/noentenc/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/noentenc?style=flat-square" /></a>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/marti-jorda-roca/noentenc?style=flat-square" /></a>
+  </p>
 </div>
 
 ```python
@@ -24,6 +30,8 @@ Translator().translate("The weather is nice today.", Language.SPANISH, Language.
 - **Small.** The default detection model is 0.9 MB. noentenc has no torch, transformers or GPU dependency, only numpy, onnxruntime, tokenizers, huggingface-hub and tqdm.
 - **One API, many models.** 12 detection models and 4 translation model families sit behind the same two classes. Swapping one is a one-line change, and every detector returns the same ISO 639-3 labels.
 - **Built for datasets.** You can pass a single string, a list or a pandas or polars column.
+
+New to noentenc? The [quickstart](docs/quickstart.md) covers detection, translation and choosing a model on one page.
 
 ## Install
 
