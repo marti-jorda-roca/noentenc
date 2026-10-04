@@ -1,0 +1,28 @@
+name: Bug report
+description: Report a reproducible problem with noentenc.
+body:
+  - type: markdown
+    attributes:
+      value: Use synthetic text in your example. Report security vulnerabilities through the private link on the issue chooser.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Explain the observed result and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include a small runnable example and any traceback. Remove credentials and private text.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include noentenc and Python versions, operating system, installed extras, and the backend, model, revision, and precision if relevant.
+    validations:
+      required: true
