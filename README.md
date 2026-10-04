@@ -6,9 +6,9 @@
   </picture>
   <p>Language detection and machine translation for Python, on CPU, without torch.</p>
   <p>
-    <a href="https://github.com/marti-jorda-roca/noentenc/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/marti-jorda-roca/noentenc/ci.yml?style=flat-square&branch=main" /></a>
-    <a href="https://pypi.org/project/noentenc/"><img alt="PyPI" src="https://img.shields.io/pypi/v/noentenc?style=flat-square" /></a>
-    <a href="https://pypi.org/project/noentenc/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/noentenc?style=flat-square" /></a>
+    <a href="https://github.com/marti-jorda-roca/noentenc/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/marti-jorda-roca/noentenc/ci.yml?style=flat-square&amp;branch=main&amp;cacheSeconds=300" /></a>
+    <a href="https://pypi.org/project/noentenc/"><img alt="PyPI" src="https://img.shields.io/pypi/v/noentenc?style=flat-square&amp;cacheSeconds=300" /></a>
+    <a href="https://pypi.org/project/noentenc/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/noentenc?style=flat-square&amp;cacheSeconds=300" /></a>
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/marti-jorda-roca/noentenc?style=flat-square" /></a>
   </p>
 </div>
