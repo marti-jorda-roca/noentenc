@@ -11,7 +11,7 @@
 
 ## 1. Your own weights in an existing backend
 
-Every backend takes a preset name or a local path as its first argument.
+`FastTextModel`, `OnnxClassifierModel` and every translation model take a preset name or a local path as their first argument.
 
 ```python
 from noentenc.language_detection import (

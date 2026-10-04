@@ -20,7 +20,6 @@ from noentenc.language_detection.models import (
     Cld3Model,
     FastTextModel,
     HeliportModel,
-    LangdetectModel,
     LangidModel,
     LinguaModel,
     OnnxClassifierModel,
@@ -49,7 +48,6 @@ def _factories(only_local: bool) -> dict[str, Callable[[], BaseModel]]:
         "cld3": Cld3Model,
         "heliport": HeliportModel,
         "langid": LangidModel,
-        "langdetect": LangdetectModel,
     }
     return factories
 

@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=2.0",
     "onnxruntime>=1.30.0",
     "tokenizers>=0.23.2",
+    "tqdm>=4.70.1",
 ]
 
 [project.optional-dependencies]
@@ -20,9 +21,7 @@ polars = ["polars>=1.44.2"]
 lingua = ["lingua-language-detector>=2.2"]
 cld3 = ["cld3-py>=3.1"]
 heliport = ["heliport>=1.0.1; sys_platform != 'win32'"]
-langid = ["langid>=1.1.6"]
-langdetect = ["langdetect>=1.0.9"]
-all = ["noentenc[pandas,polars,lingua,cld3,heliport,langid,langdetect]"]
+all = ["noentenc[pandas,polars,lingua,cld3,heliport]"]
 
 [build-system]
 requires = ["uv_build>=0.12.22,<0.13.0"]
@@ -80,6 +79,8 @@ ignore = [
 "scripts/**/*.py" = ["PLR2004", "T201"]
 "tests/**/*.py" = ["PLR2004"]
 
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

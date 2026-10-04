@@ -18,11 +18,10 @@ The detection benchmark repeats the 43 multilingual test sentences in `tests/uni
 | `heliport` | 0.15 s | 3.7 µs | 872k texts/s | ~130 MB wheel | 220 |
 | `lid176` (default) | 0.01 s | 17 µs | 356k texts/s | 0.9 MB | 176 |
 | `cld3` | <0.01 s | 16 µs | 66k texts/s | 1 MB | 107 |
+| `langid` | 0.73 s | 38 µs | 55k texts/s | 1.9 MB | 97 |
 | `lingua` (low accuracy) | <0.01 s | 0.36 ms | 18k texts/s | ~300 MB wheel | 75 |
 | `lingua` | <0.01 s | 0.44 ms | 9.2k texts/s | ~300 MB wheel | 75 |
-| `langid` | 0.64 s | 0.17 ms | 6.1k texts/s | 2 MB | 97 |
 | `bert-openlid` | 0.14 s | 0.35 ms | 3.5k texts/s | 25 MB | 201 |
-| `langdetect` | 0.10 s | 0.51 ms | 1.3k texts/s | 1 MB | 55 |
 | `xlm-roberta-lid` | 0.45 s | 3.9 ms | 395 texts/s | 279 MB | 20 |
 
 The other fastText presets (`lid176-bin`, `openlid-v2`, `openlid-v3`, `glotlid`, `nllb-lid218e`) run on the same numpy code as `lid176`. Their dense matrices are memory-mapped, so they load in milliseconds despite being 0.1 to 1.7 GB. They weren't cached on the benchmark machine. Run the script with `--download` to measure them.

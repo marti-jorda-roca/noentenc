@@ -27,29 +27,15 @@ def _build(name: str) -> BaseModel:
         )
 
         return Cld3Model()
-    if name == "heliport":
-        pytest.importorskip("heliport")
-        from noentenc.language_detection.models.heliport_model import (
-            HeliportModel,
-        )
-
-        return HeliportModel()
-    if name == "langid":
-        pytest.importorskip("langid")
-        from noentenc.language_detection.models.langid_model import (
-            LangidModel,
-        )
-
-        return LangidModel()
-    pytest.importorskip("langdetect")
-    from noentenc.language_detection.models.langdetect_model import (
-        LangdetectModel,
+    pytest.importorskip("heliport")
+    from noentenc.language_detection.models.heliport_model import (
+        HeliportModel,
     )
 
-    return LangdetectModel()
+    return HeliportModel()
 
 
-@pytest.mark.parametrize("name", ["lingua", "cld3", "heliport", "langid", "langdetect"])
+@pytest.mark.parametrize("name", ["lingua", "cld3", "heliport"])
 def test_wrapper_detects_and_normalises(name: str) -> None:
     model = _build(name)
     assert model.predict_batch(TEXTS) == ["cat", "und", "eng"]

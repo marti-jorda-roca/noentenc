@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING, overload
 
+from tqdm import tqdm
+
 from noentenc._dataframe import column_values, with_column
 from noentenc.languages import Language, UnsupportedLanguageError
 from noentenc.translation.models.base import BaseModel
@@ -50,6 +52,7 @@ class Translator:
         target_language: Language,
         source_language: Language | None = None,
         batch_size: int = 32,
+        show_progress: bool = True,
     ) -> pl.DataFrame: ...
 
     @overload
@@ -61,6 +64,7 @@ class Translator:
         target_language: Language,
         source_language: Language | None = None,
         batch_size: int = 32,
+        show_progress: bool = True,
     ) -> pd.DataFrame: ...
 
     def translate_dataset(
@@ -71,16 +75,29 @@ class Translator:
         target_language: Language,
         source_language: Language | None = None,
         batch_size: int = 32,
+        show_progress: bool = True,
     ) -> pl.DataFrame | pd.DataFrame:
         """Return `dataset` with `result_column` holding the translation of `target_column`.
 
         Works with polars and pandas frames; null texts stay null.
+        With `show_progress` a tqdm bar tracks the rows translated so far.
         """
         values = column_values(dataset, target_column)
         rows = [i for i, value in enumerate(values) if isinstance(value, str)]
-        translations = self.translate_batch(
-            [values[i] for i in rows], target_language, source_language, batch_size
-        )
+        model = self._model_for(source_language, target_language)
+        texts = [values[i] for i in rows]
+        translations: list[str] = []
+        with tqdm(
+            total=len(texts), desc="Translating", disable=not show_progress
+        ) as progress:
+            for start in range(0, len(texts), batch_size):
+                chunk = texts[start : start + batch_size]
+                translations.extend(
+                    model.predict_batch(
+                        chunk, target_language, source_language, batch_size
+                    )
+                )
+                progress.update(len(chunk))
         results: list[str | None] = [None] * len(values)
         for i, translation in zip(rows, translations, strict=True):
             results[i] = translation
