@@ -6,6 +6,7 @@ from noentenc.language_detection import LanguageDetector
 from noentenc.language_detection import base as detector_module
 from noentenc.language_detection.models.base import BaseModel
 from noentenc.language_detection.models.fasttext import FastTextModel
+from noentenc.profiles import Profile
 from tests.unit.language_detection.helpers import FASTTEXT_FIXTURES
 
 TINY = FASTTEXT_FIXTURES / "tiny-softmax.bin"
@@ -16,7 +17,7 @@ def detector() -> LanguageDetector:
     return LanguageDetector(FastTextModel(TINY))
 
 
-def test_default_model_is_lid176(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_profiles_pick_fasttext_presets(monkeypatch: pytest.MonkeyPatch) -> None:
     created: list[str] = []
 
     class FakeFastText(FastTextModel):
@@ -28,6 +29,15 @@ def test_default_model_is_lid176(monkeypatch: pytest.MonkeyPatch) -> None:
     detector = LanguageDetector()
     assert created == ["lid176"]
     assert isinstance(detector.model, BaseModel)
+    for profile in Profile:
+        LanguageDetector(profile)
+    LanguageDetector("quality")
+    assert created == ["lid176", "lid176", "openlid-v3", "glotlid", "glotlid"]
+
+
+def test_unknown_profile_is_rejected() -> None:
+    with pytest.raises(ValueError, match="'fast' is not a valid Profile"):
+        LanguageDetector("fast")
 
 
 def test_detect_and_batch(detector: LanguageDetector) -> None:

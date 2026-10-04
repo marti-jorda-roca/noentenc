@@ -214,13 +214,15 @@ _LANGUAGES = frozenset(NLLB_CODES)
 class NLLBModel(Seq2SeqModel):
     """Meta NLLB-200 distilled 600M: any pair among ~200 languages.
 
-    Licensed CC-BY-NC-4.0 (non-commercial), so it is never picked by default.
+    Licensed CC-BY-NC-4.0 (non-commercial), so the default `speed` profile never picks it;
+    `balance` and `quality` do.
     """
 
     schema = LanguageSchema(source=_LANGUAGES, target=_LANGUAGES)
     default_model: ClassVar[str] = "Xenova/nllb-200-distilled-600M"
     default_revision: ClassVar[str] = "261c31d1a5732c67cdd16d80e8d6088507c7ccea"
-    default_precision: ClassVar[Precision] = Precision.Q4
+    # The q4 export scores up to 7 chrF++ lower on FLORES-200 and is 2.6x larger.
+    default_precision: ClassVar[Precision] = Precision.INT8
 
     def __init__(
         self,

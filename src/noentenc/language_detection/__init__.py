@@ -9,6 +9,7 @@ from noentenc.language_detection.models import (
     LinguaModel,
     OnnxClassifierModel,
 )
+from noentenc.profiles import Profile
 
 __all__ = [
     "BaseModel",
@@ -19,5 +20,6 @@ __all__ = [
     "LanguageDetector",
     "LinguaModel",
     "OnnxClassifierModel",
+    "Profile",
     "to_iso639_3",
 ]

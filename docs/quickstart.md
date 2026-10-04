@@ -91,6 +91,37 @@ if source is not None:
 
 `.get` returns `None` for `und` and for languages no translation model covers, so check before translating. [translate_to_english.py](examples/translate_to_english.py) does this for a whole inbox, grouping texts by language so each group goes through the model in one batch.
 
+## Trade speed for quality
+
+Pass a profile instead of a model and noentenc picks one for you. The three profiles are `"speed"`, `"balance"` and `"quality"`, and `Profile.SPEED`, `Profile.BALANCE` and `Profile.QUALITY` work too. A misspelled profile raises `ValueError`.
+
+```python
+from noentenc import Profile
+from noentenc.language_detection import LanguageDetector
+from noentenc.translation import Translator
+
+LanguageDetector("quality")
+Translator(Profile.BALANCE)
+```
+
+- **`speed`** is the default, so `LanguageDetector()` and `Translator()` already use it. It answers fastest and downloads least.
+- **`balance`** is much more accurate on languages beyond the most common ones, and still fast enough for large datasets.
+- **`quality`** gives the best output this package has. It is the slowest and downloads the most.
+
+| Profile | Detection | Translation, pairs without an Opus-MT model |
+|---|---|---|
+| `speed` | fastText `lid176`: 0.9 MB, 176 languages | SMaLL-100: 595 MB, 100 languages |
+| `balance` | fastText `openlid-v3`: 1.2 GB, 195 languages, GPL-3.0 | NLLB-200 600M at int8: 860 MB, 196 languages, CC-BY-NC-4.0 |
+| `quality` | fastText `glotlid`: 1.7 GB, 2102 languages | NLLB-200 600M at fp32: 3.5 GB, 196 languages, CC-BY-NC-4.0 |
+
+Every translation profile uses the dedicated Opus-MT model when the pair has one (66 directions). On those pairs it scored as well as NLLB-200 on average and is about 8× faster. Without a source language, Opus-MT and NLLB-200 can't be used, so every profile uses SMaLL-100.
+
+`openlid-v3` and `glotlid` return individual languages: Swahili comes back as `swh`, and Congo Swahili as `swc`, where `lid176` says `swa`. To get one code per macrolanguage, pass the model yourself with `collapse_macrolanguages=True`.
+
+Check the licences before you use `balance` or `quality` commercially. NLLB-200 is non-commercial (CC-BY-NC-4.0) and warns when it loads, and `openlid-v3` is GPL-3.0. [Benchmarks](benchmarks.md#profiles) has the accuracy and speed of each choice, and [choose_profile.py](examples/choose_profile.py) runs all three profiles.
+
+The models behind a profile may change between releases. If you need the same output every time, pass a model explicitly as shown below.
+
 ## Choose a detection model
 
 Pass a model to `LanguageDetector`. Every backend returns the same ISO 639-3 labels, so you can swap one for another without touching the rest of your code.
@@ -135,8 +166,14 @@ Translator(OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH))
 # Many directions with one model. The source language is optional.
 Translator(SMaLL100Model())
 
-# Better quality than SMaLL-100, but it needs the source language.
-Translator(M2M100Model(precision=Precision.INT8))
+# About as accurate as SMaLL-100, better into Chinese and Japanese but worse on
+# low-resource languages, and about 4x slower. It needs the source language.
+Translator(M2M100Model())
+
+# Pick a precision explicitly: fp32, int8 or q4, where the export has it.
+Translator(
+    OpusMTModel.from_pair(Language.ENGLISH, Language.GERMAN, precision=Precision.FP32)
+)
 ```
 
 Every translation model also takes `num_threads=`, which is worth capping when several workers share a machine.

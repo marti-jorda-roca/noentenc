@@ -106,7 +106,7 @@ def opus_dir(tmp_path: Path) -> Path:
 def m2m_dir(tmp_path: Path) -> Path:
     specials = ["<s>", "<pad>", "</s>", "<unk>", "__en__", "__es__", "__fr__"]
     config = {"decoder_start_token_id": 2, "eos_token_id": 2, "pad_token_id": 1}
-    write_model_dir(tmp_path, specials, config, M2M100Model.onnx_files[Precision.Q4])
+    write_model_dir(tmp_path, specials, config, M2M100Model.onnx_files[Precision.INT8])
     write_model_dir(
         tmp_path, specials, config, SMaLL100Model.onnx_files[Precision.INT8]
     )
@@ -119,7 +119,7 @@ def nllb_dir(tmp_path: Path) -> Path:
         tmp_path,
         ["<s>", "<pad>", "</s>", "<unk>", "eng_Latn", "spa_Latn"],
         {"decoder_start_token_id": 2, "eos_token_id": 2, "pad_token_id": 1},
-        NLLBModel.onnx_files[Precision.Q4],
+        NLLBModel.onnx_files[Precision.INT8],
     )
 
 

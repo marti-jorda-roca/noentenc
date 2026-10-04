@@ -4,10 +4,12 @@ from noentenc.languages import (
     LanguageSchema,
     UnsupportedLanguageError,
 )
+from noentenc.profiles import Profile
 
 __all__ = [
     "ANY_LANGUAGE",
     "Language",
     "LanguageSchema",
+    "Profile",
     "UnsupportedLanguageError",
 ]

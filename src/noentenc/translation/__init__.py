@@ -1,3 +1,4 @@
+from noentenc.profiles import Profile
 from noentenc.translation.base import Translator
 from noentenc.translation.models._seq2seq import Precision
 from noentenc.translation.models.m2m100 import M2M100Model
@@ -11,6 +12,7 @@ __all__ = [
     "NLLBModel",
     "OpusMTModel",
     "Precision",
+    "Profile",
     "SMaLL100Model",
     "Translator",
 ]

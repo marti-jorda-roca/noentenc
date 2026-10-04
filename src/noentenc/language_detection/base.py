@@ -5,6 +5,7 @@ from tqdm import tqdm
 from noentenc._dataframe import column_values, with_column
 from noentenc.language_detection.models.base import BaseModel
 from noentenc.language_detection.models.fasttext import FastTextModel
+from noentenc.profiles import Profile
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -13,16 +14,33 @@ if TYPE_CHECKING:
 DEFAULT_TOP_K = 5
 
 
+def _profile_model(profile: Profile) -> BaseModel:
+    match profile:
+        case Profile.SPEED:
+            return FastTextModel()
+        case Profile.BALANCE:
+            return FastTextModel("openlid-v3")
+        case Profile.QUALITY:
+            return FastTextModel("glotlid")
+
+
 class LanguageDetector:
     """Detect the language of texts with any ``BaseModel`` backend.
 
-    With no model, the lightest and fastest one is used: fastText ``lid.176`` (quantized, 0.9 MB,
-    176 languages). Labels are ISO 639-3 codes; ``"und"`` means undetermined. With
-    ``with_score``, only the ``top_k`` highest-scoring languages are returned (``None`` for all).
+    ``model`` is a backend, or a ``Profile`` that picks one (``None`` is ``"speed"``):
+
+    - ``speed``: fastText ``lid176`` (quantized, 0.9 MB, 176 languages).
+    - ``balance``: fastText ``openlid-v3`` (1.2 GB, 195 languages, GPL-3.0).
+    - ``quality``: fastText ``glotlid`` (1.7 GB, 2102 labels).
+
+    Labels are ISO 639-3 codes; ``"und"`` means undetermined. With ``with_score``, only the
+    ``top_k`` highest-scoring languages are returned (``None`` for all).
     """
 
-    def __init__(self, model: BaseModel | None = None) -> None:
-        self.model = model or FastTextModel()
+    def __init__(self, model: BaseModel | Profile | str | None = None) -> None:
+        if not isinstance(model, BaseModel):
+            model = _profile_model(Profile(model or Profile.SPEED))
+        self.model = model
 
     @overload
     def detect(

@@ -8,9 +8,11 @@ from noentenc.languages import (
     LanguageSchema,
     UnsupportedLanguageError,
 )
+from noentenc.profiles import Profile
 from noentenc.translation import base as translator_module
 from noentenc.translation.base import Translator
 from noentenc.translation.models.base import BaseModel
+from noentenc.translation.models.nllb import NLLBModel
 from noentenc.translation.models.small100 import SMaLL100Model
 
 EN, ES = Language.ENGLISH, Language.SPANISH
@@ -87,17 +89,32 @@ class FakeSmall100(UpperModel):
     schema = SMaLL100Model.schema
     created = 0
 
-    def __init__(self) -> None:
+    def __init__(self, precision: str | None = None) -> None:
         FakeSmall100.created += 1
         super().__init__()
 
 
+class FakeNLLB(UpperModel):
+    schema = NLLBModel.schema
+    created: list[str | None] = []
+
+    def __init__(self, precision: str | None = None) -> None:
+        FakeNLLB.created.append(precision)
+        super().__init__()
+
+
 @pytest.fixture
-def default_translator(monkeypatch: pytest.MonkeyPatch) -> Translator:
+def fake_models(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeOpus.created = []
     FakeSmall100.created = 0
+    FakeNLLB.created = []
     monkeypatch.setattr(translator_module, "OpusMTModel", FakeOpus)
     monkeypatch.setattr(translator_module, "SMaLL100Model", FakeSmall100)
+    monkeypatch.setattr(translator_module, "NLLBModel", FakeNLLB)
+
+
+@pytest.fixture
+def default_translator(fake_models: None) -> Translator:  # noqa: ARG001
     return Translator()
 
 
@@ -113,13 +130,14 @@ def test_default_falls_back_to_small100(default_translator: Translator) -> None:
     default_translator.translate("hello", ES)  # no source: Opus-MT cannot be chosen
     assert FakeOpus.created == []
     assert FakeSmall100.created == 1
+    assert FakeNLLB.created == []
 
 
 def test_default_rejects_pairs_no_model_supports(
     default_translator: Translator,
 ) -> None:
     with pytest.raises(UnsupportedLanguageError):
-        # Acehnese is NLLB-only, and NLLB is never picked by default.
+        # Acehnese is NLLB-only, and the speed profile never picks NLLB.
         default_translator.translate("hello", Language.ACEHNESE, EN)
 
 
@@ -128,3 +146,46 @@ def test_default_rejection_without_source_names_only_the_target(
 ) -> None:
     with pytest.raises(UnsupportedLanguageError, match="translates into ace;"):
         default_translator.translate("hello", Language.ACEHNESE)
+
+
+def test_profile_accepts_strings_and_rejects_unknown_names() -> None:
+    assert Translator("quality").profile is Profile.QUALITY
+    assert Translator(Profile.BALANCE).profile is Profile.BALANCE
+    assert Translator().profile is Profile.SPEED
+    with pytest.raises(ValueError, match="'fast' is not a valid Profile"):
+        Translator("fast")
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_explicit_model_ignores_profiles() -> None:
+    translator = Translator(UpperModel())
+    translator.translate("hello", ES, EN)
+    assert FakeOpus.created == []
+
+
+@pytest.mark.usefixtures("fake_models")
+@pytest.mark.parametrize(
+    ("profile", "precision"), [(Profile.BALANCE, "int8"), (Profile.QUALITY, "fp32")]
+)
+def test_profiles_prefer_opus_then_nllb(profile: Profile, precision: str) -> None:
+    translator = Translator(profile)
+    translator.translate("hello", ES, EN)
+    translator.translate("bon dia", Language.JAPANESE, Language.CATALAN)
+    translator.translate("bon dia", Language.ACEHNESE, Language.CATALAN)
+    assert FakeOpus.created == [(EN, ES)]
+    assert FakeNLLB.created == [precision]
+    assert FakeSmall100.created == 0
+
+
+@pytest.mark.usefixtures("fake_models")
+@pytest.mark.parametrize("profile", list(Profile))
+def test_every_profile_falls_back_to_small100_without_source(profile: Profile) -> None:
+    Translator(profile).translate("hello", ES)
+    assert FakeSmall100.created == 1
+    assert FakeNLLB.created == []
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_rejection_names_the_profile() -> None:
+    with pytest.raises(UnsupportedLanguageError, match="No quality model translates"):
+        Translator("quality").translate("hello", Language.ACEHNESE)

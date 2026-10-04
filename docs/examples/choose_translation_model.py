@@ -27,8 +27,10 @@ print(opus.translate("The meeting was moved to Friday.", ES))
 small100 = Translator(SMaLL100Model(num_threads=2))
 print(small100.translate("Bon dia a tothom!", EN))
 
-# 3. Better quality than SMaLL-100, still MIT: M2M100 418M. It needs the source language.
-m2m100 = Translator(M2M100Model(precision=Precision.INT8))
+# 3. Also MIT: M2M100 418M. About as accurate as SMaLL-100, better into Chinese and
+#    Japanese but worse on low-resource languages, about 4x slower, and it needs the
+#    source language.
+m2m100 = Translator(M2M100Model())
 print(m2m100.translate("Bon dia a tothom!", EN, source_language=CA))
 
 # Every model declares the languages it handles, and an unsupported pair raises.
