@@ -28,6 +28,12 @@ LANGID_SDIST = RemoteFile(
     sha256="044bcae1912dab85c33d8e98f2811b8f4ff1213e5e9a9e9510137b84da2cb293",
 )
 MODEL_MEMBER = "langid-1.1.6/langid/langid.py"
+_BYTE_BITS = 8
+_BYTE_VALUES = 1 << _BYTE_BITS
+# `_states` looks up two bytes at once from the root, so windows have at least two bytes.
+_MIN_WINDOW = 2
+# Below 1 byte per this many DFA states, `_log_scores` finds the visited states by sorting.
+_SORT_RATIO = 8
 _MODEL_STRING = re.compile(rb'^model=b"""(.*?)"""', re.DOTALL | re.MULTILINE)
 
 
@@ -107,28 +113,80 @@ class LangidModel(BaseModel):
             )
         weights = load_weights(fetch(LANGID_SDIST, only_local_files=only_local_files))
         keep = _candidates(weights.labels, languages)
-        self._next_state = weights.next_state
+        self._next_state = np.asarray(weights.next_state, dtype=np.uint16)
         self._n_states = weights.n_states
+        # Any window at least as long as the longest n-gram gives the same states.
+        self._window = max(_max_depth(self._next_state), _MIN_WINDOW)
+        idle = np.flatnonzero(self._next_state[:_BYTE_VALUES] == 0)
+        if not len(idle):
+            raise ValueError("langid's DFA has no byte that keeps it at its root")
+        # Fed to the root, this byte leaves it there: padding with it resets the DFA.
+        self._pad = bytes([int(idle[0])]) * (self._window - 1)
         self._state_log_prob = _state_log_prob(weights)[:, keep]
+        # The walk's last step sends states where no feature ends to the root, which has no
+        # features either: fewer distinct states to count, same scores.
+        scored = self._state_log_prob.any(axis=1)
+        if scored[0]:
+            raise ValueError("langid's DFA root state has features")
+        self._last_step = np.where(scored[self._next_state], self._next_state, 0)
+        # The state reached from the root on any two bytes, indexed by `(b1 << 8) | b2`.
+        second = self._last_step if self._window == _MIN_WINDOW else self._next_state
+        self._two_steps = second[
+            _shift_byte(self._next_state[:_BYTE_VALUES, None]) + np.arange(_BYTE_VALUES)
+        ].ravel()
         self._class_log_prior = weights.class_log_prior[keep]
         self._mapper = self._label_mapper([weights.labels[i] for i in keep])
 
-    def _states(self, text: str) -> list[int]:
-        """The DFA state entered after each UTF-8 byte of ``text``."""
-        next_state = self._next_state
-        state = 0
-        states = []
-        for byte in text.encode():
-            state = next_state[(state << 8) + byte]
-            states.append(state)
-        return states
+    def _states(self, texts: list[str]) -> tuple[np.ndarray, np.ndarray]:
+        """``(states, owner)``: the DFA state entered after each UTF-8 byte of every text.
+
+        States with no features come back as the root, 0.
+
+        langid's DFA is an Aho-Corasick automaton over byte n-grams of at most ``window``
+        bytes, so the state after a byte depends only on the last ``window`` bytes: running
+        the DFA from the root over each window gives the same states as a walk over the
+        whole text, and all windows are computed at once. Texts are joined with padding
+        that keeps the DFA at the root, so windows never mix two texts. ``owner`` is the
+        text of each byte, or ``len(texts)`` for padding bytes.
+        """
+        encoded = [text.encode() for text in texts]
+        pad = self._pad
+        blob = np.frombuffer(pad + pad.join(encoded), dtype=np.uint8).astype(np.intp)
+        window = self._window
+        n = len(blob) - window + 1
+        state = self._two_steps[_shift_byte(blob[:n]) + blob[1 : n + 1]]
+        for k in range(2, window):
+            table = self._last_step if k == window - 1 else self._next_state
+            state = table[_shift_byte(state) + blob[k : n + k]]
+        # Window i ends on blob byte i + len(pad): text 0, padding, text 1, ..., text B-1.
+        spans = np.full(2 * len(texts) - 1, len(pad))
+        spans[::2] = [len(e) for e in encoded]
+        owners = np.full(len(spans), len(texts))
+        owners[::2] = np.arange(len(texts))
+        return state, np.repeat(owners, spans)
 
     def _log_scores(self, texts: list[str]) -> np.ndarray:
-        """Unnormalised log P(class | text), shape ``(len(texts), n_candidates)``."""
-        visits = np.stack(
-            [np.bincount(self._states(t), minlength=self._n_states) for t in texts]
+        """Unnormalised log P(class | text), shape ``(len(texts), n_candidates)``.
+
+        Counts state visits per text, over only the states this batch visits.
+        """
+        states, owner = self._states(texts)
+        if len(states) * _SORT_RATIO < self._n_states:
+            # Few bytes: sorting them is cheaper than scanning every state.
+            visited, column = np.unique(states, return_inverse=True)
+        else:
+            visited = np.flatnonzero(np.bincount(states, minlength=self._n_states))
+            columns = np.zeros(self._n_states, dtype=np.intp)
+            columns[visited] = np.arange(len(visited))
+            column = columns[states]
+        rows = len(texts) + 1  # the last row collects the padding bytes
+        visits = np.bincount(
+            owner * len(visited) + column, minlength=rows * len(visited)
+        ).reshape(rows, len(visited))[:-1]
+        return (
+            visits.astype(np.float64) @ self._state_log_prob[visited]
+            + self._class_log_prior
         )
-        return visits @ self._state_log_prob + self._class_log_prior
 
     def _predict_chunk(self, texts: list[str]) -> list[str]:
         scores = self._log_scores(texts)
@@ -156,6 +214,27 @@ def _candidates(labels: list[str], languages: Iterable[str] | None) -> list[int]
     if unknown := wanted - known:
         raise ValueError(f"langid has no language {', '.join(sorted(unknown))}")
     return keep
+
+
+def _shift_byte(states: np.ndarray) -> np.ndarray:
+    """``states << 8`` as row offsets into a ``(state, byte)`` table, widened before shifting."""
+    return np.left_shift(states, _BYTE_BITS, dtype=np.intp)
+
+
+def _max_depth(next_state: np.ndarray) -> int:
+    """Longest byte string a state stands for: its breadth-first distance from the root."""
+    table = next_state.reshape(-1, _BYTE_VALUES)
+    seen = np.zeros(len(table), dtype=bool)
+    seen[0] = True
+    frontier = np.array([0])
+    depth = 0
+    while True:
+        reached = np.unique(table[frontier])
+        frontier = reached[~seen[reached]]
+        if not len(frontier):
+            return depth
+        seen[frontier] = True
+        depth += 1
 
 
 def _state_log_prob(weights: LangidWeights) -> np.ndarray:

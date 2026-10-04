@@ -5,6 +5,12 @@
     <img src="docs/assets/logo-light.svg" alt="noentenc" width="520">
   </picture>
   <p>Language detection and machine translation for Python, on CPU, without torch.</p>
+  <p>
+    <a href="https://github.com/marti-jorda-roca/noentenc/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/marti-jorda-roca/noentenc/ci.yml?style=flat-square&branch=main" /></a>
+    <a href="https://pypi.org/project/noentenc/"><img alt="PyPI" src="https://img.shields.io/pypi/v/noentenc?style=flat-square" /></a>
+    <a href="https://pypi.org/project/noentenc/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/noentenc?style=flat-square" /></a>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/marti-jorda-roca/noentenc?style=flat-square" /></a>
+  </p>
 </div>
 
 ```python
@@ -19,29 +25,24 @@ Translator().translate("The weather is nice today.", Language.SPANISH, Language.
 # 'El tiempo es bueno hoy.'
 ```
 
-- **Fast.** The default detector labels about 350,000 texts per second on a laptop CPU, and a direct Opus-MT translation takes about 60 ms per sentence. See [benchmarks](docs/benchmarks.md).
-
-  | Task | Model | Single input | Batched |
-  |---|---|---:|---:|
-  | Detection | heliport | 4 µs | 872k texts/s |
-  | Detection | **lid176 (default)** | 17 µs | 356k texts/s |
-  | Detection | cld3 | 16 µs | 66k texts/s |
-  | Detection | lingua | 0.44 ms | 9k texts/s |
-  | Detection | bert-openlid | 0.35 ms | 3.5k texts/s |
-  | Translation (en→es) | **Opus-MT (default for direct pairs)** | 63 ms | 100 sent/s |
-  | Translation (en→es) | **SMaLL-100 (default otherwise)** | 52 ms | 75 sent/s |
-  | Translation (en→es) | M2M100 418M | 231 ms | 15 sent/s |
-  | Translation (en→es) | NLLB-200 600M (int8) | 770 ms | 10 sent/s |
-
-  Apple M3, batches of 256 texts for detection and 32 sentences for translation.
-
+- **Fast.** Detects a language in as little as 2.5 µs and translates a sentence in about 52 ms, on a laptop CPU. See [benchmarks](docs/benchmarks.md).
+- **Faster than the originals.** Up to 470× faster than `langid.py`, 2× faster than the C++ `fasttext` package and 5.8× faster than transformers + PyTorch, with the same accuracy. See [the comparison](docs/benchmarks.md#against-the-original-implementations).
 - **Small.** The default detection model is 0.9 MB. noentenc has no torch, transformers or GPU dependency, only numpy, onnxruntime, tokenizers, huggingface-hub and tqdm.
 - **One API, many models.** 12 detection models and 4 translation model families sit behind the same two classes. Swapping one is a one-line change, and every detector returns the same ISO 639-3 labels.
 - **Built for datasets.** You can pass a single string, a list or a pandas or polars column.
 
+New to noentenc? The [quickstart](docs/quickstart.md) covers detection, translation and choosing a model on one page.
+
 ## Install
 
 noentenc uses [uv](https://docs.astral.sh/uv/) to manage dependencies.
+
+Requires Python 3.14 or newer. Install with pip or uv:
+
+```bash
+pip install noentenc
+pip install 'noentenc[all]'
+```
 
 ```bash
 uv add noentenc                  # fastText, ONNX and langid detection + every translation model
@@ -91,6 +92,27 @@ translator.translate_dataset(df, "review", "review_en", Language.ENGLISH)
 
 `Translator()` picks the lightest model for each pair. It uses a dedicated Opus-MT model when one exists for the direction (66 directions, about 75M parameters each). For any other pair it uses SMaLL-100, which covers 100 languages. Languages are always `Language` enum members, so a typo fails at the call site, and a model that can't handle a pair raises `UnsupportedLanguageError`.
 
+## Trade speed for quality
+
+`LanguageDetector` and `Translator` take a profile in place of a model: `"speed"` (the default), `"balance"` or `"quality"`.
+
+```python
+from noentenc import Profile
+from noentenc.language_detection import LanguageDetector
+from noentenc.translation import Translator
+
+LanguageDetector("quality")  # fastText GlotLID
+Translator(Profile.BALANCE)  # Opus-MT where it exists, otherwise NLLB-200 at int8
+```
+
+| Profile | Detection | Translation, pairs without an Opus-MT model |
+|---|---|---|
+| `speed` (default) | `lid176`: 0.9 MB | SMaLL-100: 595 MB |
+| `balance` | `openlid-v3`: 1.2 GB, GPL-3.0 | NLLB-200 int8: 860 MB, CC-BY-NC-4.0 |
+| `quality` | `glotlid`: 1.7 GB | NLLB-200 fp32: 3.5 GB, CC-BY-NC-4.0 |
+
+On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 languages tested, and NLLB-200 adds up to 19 chrF++ on low-resource pairs such as English to Tamil. See [the profiles benchmark](docs/benchmarks.md#profiles) for the numbers behind each choice. The models behind a profile may change between releases, so pass a model explicitly when you need reproducible output.
+
 ## Examples
 
 | Example | Shows how to |
@@ -99,6 +121,7 @@ translator.translate_dataset(df, "review", "review_en", Language.ENGLISH)
 | [translate_to_english.py](docs/examples/translate_to_english.py) | Detect each message's language, then batch-translate everything into English. |
 | [choose_detection_backend.py](docs/examples/choose_detection_backend.py) | Swap backends, restrict candidate languages, collapse macrolanguages. |
 | [choose_translation_model.py](docs/examples/choose_translation_model.py) | Pick a model, precision and thread count, and run offline. |
+| [choose_profile.py](docs/examples/choose_profile.py) | Trade latency for quality with the `speed`, `balance` and `quality` profiles. |
 | [custom_models.py](docs/examples/custom_models.py) | Plug your own detector and translator into the same API. |
 
 ## Models
@@ -140,8 +163,8 @@ LanguageDetector(LinguaModel(languages=["cat", "spa", "eng"]))  # only these can
 |---|---|---|---|
 | `OpusMTModel.from_pair(src, tgt)` | 1 direction each, 66 available (`OPUS_MT_PAIRS`) | 287 MB (q4), 107 MB (int8) | CC-BY-4.0 or Apache-2.0, per pair |
 | `SMaLL100Model` | any source → 100 targets | 595 MB (int8) | MIT |
-| `M2M100Model` | 100 ↔ 100 | 1.2 GB (q4), 603 MB (int8) | MIT |
-| `NLLBModel` | 196 ↔ 196 | 860 MB (int8) | CC-BY-NC-4.0, never picked by default |
+| `M2M100Model` | 100 ↔ 100 | 603 MB (int8) | MIT |
+| `NLLBModel` | 196 ↔ 196 | 860 MB (int8) | CC-BY-NC-4.0, used by the `balance` and `quality` profiles |
 
 Every translation model takes `precision=` (`fp32`, `int8`, `q4`, where the export has it), `num_threads=` and a Hugging Face repo id or local directory as `model=`.
 
@@ -170,4 +193,4 @@ make unit-tests
 make integration-tests   # tests/integrations; downloads real weights
 ```
 
-`scripts/benchmark_lid.py` and `scripts/benchmark_translation.py` reproduce the speed numbers. `scripts/make_fasttext_fixtures.py` regenerates the fastText parity fixtures with the reference `fasttext` package. That package needs Python 3.12, and the script's docstring has the command. `scripts/make_langid_fixtures.py` does the same for langid with the reference `langid` package.
+`scripts/benchmark_lid.py` and `scripts/benchmark_translation.py` reproduce the speed numbers, and `scripts/benchmark_vs_reference.py` the comparison with the original implementations. `scripts/make_fasttext_fixtures.py` regenerates the fastText parity fixtures with the reference `fasttext` package. That package needs Python 3.12, and the script's docstring has the command. `scripts/make_langid_fixtures.py` does the same for langid with the reference `langid` package.

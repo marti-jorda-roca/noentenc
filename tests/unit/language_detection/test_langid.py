@@ -19,18 +19,20 @@ from noentenc.language_detection.models.langid_model import (
     load_weights,
 )
 
-# One DFA state per last byte read (state = byte + 1) and two unigram features: "a" (0) and
-# "b" (1). "a" is 9x likelier in English, "b" 9x likelier in Catalan.
+# Two unigram features, "a" (0) and "b" (1), and an Aho-Corasick DFA like langid's: state 1
+# after an "a", state 2 after a "b", state 3 (no features) after a "c", the root (0) after any
+# other byte. "a" is 9x likelier in English, "b" 9x likelier in Catalan.
 LABELS = ["en", "ca"]
 FEATURE_LOG_PROB = [math.log(0.9), math.log(0.1), math.log(0.1), math.log(0.9)]
+FEATURE_STATES = {ord("a"): 1, ord("b"): 2, ord("c"): 3}
 
 
 def _model_pickle(obj: object = None) -> bytes:
     if obj is None:
         next_state = array.array(
-            "H", [byte + 1 for _ in range(257) for byte in range(256)]
+            "H", [FEATURE_STATES.get(byte, 0) for _ in range(4) for byte in range(256)]
         )
-        state_features = {ord("a") + 1: (0,), ord("b") + 1: (1,)}
+        state_features = {1: (0,), 2: (1,)}
         obj = (
             array.array("f", FEATURE_LOG_PROB),
             array.array("f", [math.log(0.5)] * 2),
@@ -93,3 +95,31 @@ def test_only_array_globals_are_unpickled(tmp_path: Path) -> None:
 def test_unknown_model_name(tiny_cache: Path) -> None:  # noqa: ARG001 - sets the cache
     with pytest.raises(ValueError, match="only one is 'langid'"):
         LangidModel("langid-v2")
+
+
+def _walk(model: LangidModel, text: str) -> list[int]:
+    """Reference: langid's byte-by-byte DFA walk, with featureless states reported as 0."""
+    state, states = 0, []
+    for byte in text.encode():
+        state = int(model._next_state[(state << 8) + byte])
+        states.append(state if model._state_log_prob[state].any() else 0)
+    return states
+
+
+@pytest.mark.usefixtures("tiny_cache")
+def test_batched_states_match_a_sequential_walk() -> None:
+    model = LangidModel()
+    texts = ["aab", "", "b", "xxaxb\0a", "ñacb", "bac" * 50]
+    states, owner = model._states(texts)
+    for i, text in enumerate(texts):
+        assert states[owner == i].tolist() == _walk(model, text), text
+    assert set(owner.tolist()) <= set(range(len(texts) + 1))
+
+
+@pytest.mark.usefixtures("tiny_cache")
+def test_batch_scores_match_single_text_scores() -> None:
+    model = LangidModel()
+    texts = ["aab", "abb", "b", "xxcaxb", "bac" * 50]
+    batched = model.predict_batch_score(texts, top_k=None)
+    for text, scores in zip(texts, batched, strict=True):
+        assert scores == pytest.approx(model.predict_score(text, top_k=None))

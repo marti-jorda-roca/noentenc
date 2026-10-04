@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
+from functools import cached_property
 from pathlib import Path
 
 from noentenc.language_detection.labels import (
@@ -58,10 +59,14 @@ class BaseModel(ABC):
         """``{label: score}`` for each (non-empty) text, sorted descending."""
 
     def predict(self, text: str) -> str:
-        return self.predict_batch([text])[0]
+        if not text or text.isspace():
+            return UNDETERMINED
+        return self._predict_chunk([text])[0]
 
     def predict_score(self, text: str, top_k: int | None = None) -> dict[str, float]:
-        return self.predict_batch_score([text], top_k=top_k)[0]
+        if not text or text.isspace():
+            return {UNDETERMINED: 1.0}
+        return self._predict_score_chunk([text], top_k)[0]
 
     def predict_batch(self, texts: list[str], batch_size: int = 32) -> list[str]:
         return _run_batched(
@@ -94,11 +99,19 @@ class BaseModel(ABC):
         )
 
     def _label(self, native: str) -> str:
-        return normalize_label(
-            native,
-            normalize=self.normalize_labels,
-            collapse_macrolanguages=self.collapse_macrolanguages,
-        )
+        """``native`` normalised as configured, memoised: backends call this once per text."""
+        label = self._labels_seen.get(native)
+        if label is None:
+            label = self._labels_seen[native] = normalize_label(
+                native,
+                normalize=self.normalize_labels,
+                collapse_macrolanguages=self.collapse_macrolanguages,
+            )
+        return label
+
+    @cached_property
+    def _labels_seen(self) -> dict[str, str]:
+        return {}
 
     def _normalize_scores(self, scores: Mapping[str, float]) -> dict[str, float]:
         return normalize_scores(

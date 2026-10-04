@@ -12,6 +12,12 @@ from noentenc._onnx import create_session, pad
 from noentenc.language_detection._download import RemoteFile, fetch
 from noentenc.language_detection.models.base import BaseModel
 
+# Texts are cut before tokenizing at this many characters per token of `max_length`. Tokens
+# are a few characters long, so the cut almost always keeps more than `max_length` tokens.
+MAX_CHARS_PER_TOKEN = 8
+# Tokens kept per text for local model directories; presets set their own.
+DEFAULT_MAX_LENGTH = 128
+
 
 @dataclass(frozen=True)
 class OnnxPreset:
@@ -21,6 +27,9 @@ class OnnxPreset:
     onnx_sha256: str
     license: str
     description: str
+    # Tokens kept per text. Compute grows with it; past this, longer inputs stopped changing
+    # accuracy on WiLI-2018 paragraphs (see docs/benchmarks.md).
+    max_length: int = DEFAULT_MAX_LENGTH
 
     def remote(self, filename: str, sha256: str | None = None) -> RemoteFile:
         return RemoteFile.huggingface(self.repo, filename, self.revision, sha256)
@@ -42,6 +51,7 @@ PRESETS: dict[str, OnnxPreset] = {
         onnx_sha256="ee8599c721d24f678ef10cee403f4deda3a40e7e237e9983b3df11bf3f34ec2e",
         license="MIT",
         description="alexneakameni 4-layer BERT trained on OpenLID, 201 labels, int8 (25 MB).",
+        max_length=96,
     ),
 }
 
@@ -52,9 +62,11 @@ class OnnxClassifierModel(BaseModel):
     ``model`` is a preset name (see ``PRESETS``) or a local directory holding ``config.json``,
     ``tokenizer.json`` and either ``model.onnx`` or ``onnx/model_quantized.onnx``.
 
-    Speed: texts are truncated to ``max_length`` tokens, batches are formed from texts of similar
-    length and padded only to their longest member, and onnxruntime runs with full graph
-    optimisation. ``num_threads=None`` lets onnxruntime use every physical core.
+    Speed: texts are truncated to ``max_length`` tokens (``None``: the preset's, or 128 for a
+    local directory), batches are formed from texts of similar length and padded only to their
+    longest member, and onnxruntime runs with full graph optimisation. ``num_threads=None`` lets
+    onnxruntime use every physical core. Long texts are cut at a space before tokenizing, far
+    enough out that the kept tokens don't change.
     """
 
     sort_batches_by_length = True
@@ -65,13 +77,16 @@ class OnnxClassifierModel(BaseModel):
         only_local_files: bool = False,
         normalize_labels: bool = True,
         collapse_macrolanguages: bool = False,
-        max_length: int = 128,
+        max_length: int | None = None,
         num_threads: int | None = None,
     ) -> None:
         super().__init__(
             model, only_local_files, normalize_labels, collapse_macrolanguages
         )
         onnx_path, tokenizer_path, config_path = self._resolve(model, only_local_files)
+        if max_length is None:
+            preset = PRESETS.get(model) if isinstance(model, str) else None
+            max_length = preset.max_length if preset else DEFAULT_MAX_LENGTH
 
         config = json.loads(config_path.read_text(encoding="utf-8"))
         id2label = config["id2label"]
@@ -82,6 +97,7 @@ class OnnxClassifierModel(BaseModel):
         self._tokenizer = Tokenizer.from_file(str(tokenizer_path))
         self._tokenizer.no_padding()
         self._tokenizer.enable_truncation(max_length=max_length)
+        self._max_chars = max_length * MAX_CHARS_PER_TOKEN
         self._session = create_session(onnx_path, num_threads)
         self._input_names = {inp.name for inp in self._session.get_inputs()}
 
@@ -118,10 +134,31 @@ class OnnxClassifierModel(BaseModel):
             )
         return onnx_path, root / "tokenizer.json", root / "config.json"
 
+    def token_ids(self, texts: list[str]) -> list[list[int]]:
+        """Token ids of each text, truncated to ``max_length``.
+
+        A text longer than ``max_length * MAX_CHARS_PER_TOKEN`` characters is first cut at a
+        space: tokens never span whitespace, so the cut text's tokens are a prefix of the
+        whole text's. When the cut text still overflows ``max_length``, its truncated tokens
+        are exactly the whole text's; otherwise the whole text is tokenized instead.
+        """
+        cut = [_cut_at_space(text, self._max_chars) for text in texts]
+        encodings = self._tokenizer.encode_batch(cut)
+        short = [
+            i
+            for i, (text, part, enc) in enumerate(
+                zip(texts, cut, encodings, strict=True)
+            )
+            if part is not text and not enc.overflowing
+        ]
+        if short:
+            redone = self._tokenizer.encode_batch([texts[i] for i in short])
+            for i, enc in zip(short, redone, strict=True):
+                encodings[i] = enc
+        return [enc.ids for enc in encodings]
+
     def logits(self, texts: list[str]) -> np.ndarray:
-        input_ids, attention_mask = pad(
-            [enc.ids for enc in self._tokenizer.encode_batch(texts)], self._pad_id
-        )
+        input_ids, attention_mask = pad(self.token_ids(texts), self._pad_id)
         feeds: dict[str, Any] = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -143,6 +180,14 @@ class OnnxClassifierModel(BaseModel):
         self, texts: list[str], top_k: int | None
     ) -> list[dict[str, float]]:
         return self._mapper.to_dicts(self._scores(texts), top_k)
+
+
+def _cut_at_space(text: str, limit: int) -> str:
+    """``text`` up to its last space before ``limit`` characters (``text`` itself if short)."""
+    if len(text) <= limit:
+        return text
+    space = text.rfind(" ", limit // 2, limit)
+    return text if space < 0 else text[:space]
 
 
 def _softmax(logits: np.ndarray) -> np.ndarray:

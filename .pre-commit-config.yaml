@@ -43,6 +43,22 @@ repos:
         language: unsupported
         pass_filenames: false
 
+      - id: zizmor
+        name: zizmor
+        language: unsupported
+        entry: uv run zizmor .
+        files: ^\.github/|^\.pre-commit-config\.yaml$|^uv\.lock$
+        require_serial: true
+        pass_filenames: false
+
+      - id: trivy
+        name: Trivy security scan
+        entry: trivy fs --config trivy.yaml .
+        language: system
+        pass_filenames: false
+        require_serial: true
+        always_run: true
+
       - id: library-skills-check
         name: library-skills check
         entry: uv run library-skills --check

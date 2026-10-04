@@ -31,6 +31,7 @@ def _fake_model(input_names: set[str]) -> tuple[OnnxClassifierModel, _FakeSessio
     model.normalize_labels, model.collapse_macrolanguages = True, False
     model._mapper = LabelMapper(["en", "es"])
     model._pad_id = 9
+    model._max_chars = 1000
     model._tokenizer = cast("Tokenizer", _FakeTokenizer())
     session = _FakeSession()
     model._session = cast("InferenceSession", session)
@@ -61,3 +62,41 @@ def test_probabilities_are_softmax() -> None:
     model, _ = _fake_model({"input_ids", "attention_mask"})
     scores = model.predict_score("a b c", top_k=None)
     assert scores == {"eng": pytest.approx(0.5), "spa": pytest.approx(0.5)}
+
+
+class _TruncatingTokenizer:
+    """One token per word, truncated to `max_length` with the rest in `overflowing`."""
+
+    def __init__(self, max_length: int) -> None:
+        self.max_length = max_length
+        self.seen: list[str] = []
+
+    def encode_batch(self, texts: list[str]) -> list[SimpleNamespace]:
+        self.seen += texts
+        out = []
+        for text in texts:
+            ids = [len(word) for word in text.split()]
+            out.append(
+                SimpleNamespace(
+                    ids=ids[: self.max_length],
+                    overflowing=[ids[self.max_length :]]
+                    if len(ids) > self.max_length
+                    else [],
+                )
+            )
+        return out
+
+
+def test_long_texts_are_cut_without_changing_their_tokens() -> None:
+    model, _ = _fake_model({"input_ids", "attention_mask"})
+    tokenizer = _TruncatingTokenizer(max_length=4)
+    model._tokenizer = cast("Tokenizer", tokenizer)
+    model._max_chars = 20
+    short_words = "ab " * 30  # 4 tokens fit well within the cut
+    long_words = "abcdefghij " * 5  # 2 words per 20 characters: the cut keeps too few
+    small = "ab cd"
+    ids = model.token_ids([short_words, long_words, small])
+    assert ids == [[2, 2, 2, 2], [10, 10, 10, 10], [2, 2]]
+    # The first text was tokenized from its cut, the second again in full after its cut.
+    assert tokenizer.seen[0] == short_words[:17].rstrip()
+    assert tokenizer.seen[3:] == [long_words]

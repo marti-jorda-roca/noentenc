@@ -8,6 +8,8 @@ Usage:
 Reports load time, median single-text latency, and batched throughput on the multilingual test
 sentences repeated to ``--texts`` items. Repetition keeps fastText's per-word cache hot, which
 matches real corpora (words repeat); ``FastTextModel(cache_size=0)`` shows the uncached cost.
+``--corpus FILE`` measures on your own texts instead, one per line and none repeated, e.g. the
+WiLI-2018 test paragraphs used in docs/benchmarks.md.
 """
 
 import argparse
@@ -78,10 +80,22 @@ def main() -> None:
     parser.add_argument(
         "--download", action="store_true", help="download missing weights"
     )
+    parser.add_argument(
+        "--corpus", type=Path, help="text file, one text per line, used without repeats"
+    )
     args = parser.parse_args()
 
-    sentences = SENTENCES.read_text(encoding="utf-8").splitlines()
-    texts = (sentences * (args.texts // len(sentences) + 1))[: args.texts]
+    fixtures = SENTENCES.read_text(encoding="utf-8").splitlines()
+    if args.corpus:
+        lines = args.corpus.read_text(encoding="utf-8").splitlines()
+        texts = lines[: args.texts]
+        # Time single texts on lines the throughput run hasn't seen (and cached).
+        sentences = lines[args.texts : args.texts + SINGLE_RUNS] or texts
+        warm_up = fixtures
+    else:
+        sentences = fixtures
+        texts = (sentences * (args.texts // len(sentences) + 1))[: args.texts]
+        warm_up = texts[:256]
     factories = _factories(only_local=not args.download)
     names = args.models or list(factories)
 
@@ -101,7 +115,7 @@ def main() -> None:
             if "xlm" not in name and "bert" not in name
             else min(len(texts), 2_000)
         )
-        _throughput(model, texts[:256], args.batch_size)  # warm-up
+        _throughput(model, warm_up, args.batch_size)
         batch = _throughput(model, texts[:n], args.batch_size)
         single = _single_latency_us(model, sentences)
         print(f"{name:<22}{load:>9.2f}{single:>12.1f}{batch:>15,.0f}")

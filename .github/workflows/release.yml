@@ -31,7 +31,7 @@ jobs:
   checks:
     name: Release checks
     needs: validate-main
-    uses: ./.github/workflows/ci.yml
+    uses: $/.github/workflows/ci.yml
 
   publish:
     name: Publish to PyPI

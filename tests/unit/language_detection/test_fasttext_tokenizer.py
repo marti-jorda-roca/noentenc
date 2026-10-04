@@ -135,8 +135,46 @@ def test_word_ngrams_follow_fasttext_hashing() -> None:
     assert rows[-2:] == [1 + h % 1000 for h in expected]
 
 
-def test_word_rows_are_cached() -> None:
-    tok = Tokenizer(_weights([EOS]))
-    tok.text_rows("hello hello")
-    info = tok.word_rows.cache_info()  # ty: ignore[unresolved-attribute]
-    assert (info.hits, info.misses) == (1, 1)
+BATCH_WORDS = [
+    "hello",
+    "hi",
+    "à",
+    "çava",
+    "日本語",
+    "😀👍",
+    "a",
+    "__label__x",
+    EOS,
+    "",
+    "<>",
+    "x" * 40,
+]
+
+
+@pytest.mark.parametrize(("minn", "maxn"), [(2, 3), (1, 5), (3, 3), (0, 3), (0, 0)])
+@pytest.mark.parametrize("vocab", [[EOS, "hi"], ["hi"]])
+def test_word_rows_batch_matches_word_rows(
+    minn: int, maxn: int, vocab: list[str]
+) -> None:
+    tok = Tokenizer(_weights(vocab, minn=minn, maxn=maxn), cache_size=0)
+    # Both the numpy pass (many words) and the per-word path (a few).
+    for words in (BATCH_WORDS, BATCH_WORDS[-3:]):
+        owner, rows = tok.word_rows_batch(words)
+        for i, word in enumerate(words):
+            expected = tok.eos_rows if word == "" else tok.word_rows(word)
+            assert rows[owner == i].tolist() == list(expected), word
+
+
+def test_word_rows_batch_on_pruned_models() -> None:
+    unpruned = Tokenizer(_weights([EOS]), cache_size=0).subword_rows("hello")
+    keep = {unpruned[0] - 1: 7, unpruned[2] - 1: 3}
+    for pruneidx in (keep, {}):
+        tok = Tokenizer(_weights([EOS], pruneidx=pruneidx), cache_size=0)
+        owner, rows = tok.word_rows_batch(["hello", "x", *BATCH_WORDS])
+        assert rows[owner == 0].tolist() == tok.subword_rows("hello")
+        assert rows[owner == 1].tolist() == tok.subword_rows("x")
+
+
+def test_word_rows_batch_of_nothing() -> None:
+    owner, rows = Tokenizer(_weights([EOS]), cache_size=0).word_rows_batch([])
+    assert owner.size == rows.size == 0
