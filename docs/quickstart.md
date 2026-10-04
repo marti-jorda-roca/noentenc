@@ -121,7 +121,13 @@ Pass a model to `Translator` to use it for every call.
 
 ```python
 from noentenc import Language
-from noentenc.translation import M2M100Model, OpusMTModel, Precision, SMaLL100Model, Translator
+from noentenc.translation import (
+    M2M100Model,
+    OpusMTModel,
+    Precision,
+    SMaLL100Model,
+    Translator,
+)
 
 # One direction, fastest. Check `OPUS_MT_PAIRS` for the 66 available directions.
 Translator(OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH))
@@ -140,7 +146,9 @@ If a model can't handle a pair, the call raises `UnsupportedLanguageError`.
 ```python
 from noentenc import UnsupportedLanguageError
 
-english_to_spanish = Translator(OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH))
+english_to_spanish = Translator(
+    OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH)
+)
 
 try:
     english_to_spanish.translate("Hello", Language.FRENCH)
@@ -165,7 +173,9 @@ Every model takes `only_local_files=True`. With it, a model that isn't in the ca
 
 ```python
 LanguageDetector(FastTextModel(only_local_files=True))
-Translator(OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH, only_local_files=True))
+Translator(
+    OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH, only_local_files=True)
+)
 ```
 
 Detection weights live in `~/.cache/noentenc`, or wherever `NOENTENC_CACHE` points. Translation weights live in the Hugging Face cache.
