@@ -104,7 +104,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 # Projects share test module basenames (e.g. test_train_model.py); importlib mode
 # gives each file a unique module name instead of colliding on sys.modules.
-importmode = "importlib"
+addopts = "--import-mode=importlib"
 consider_namespace_packages = true
 markers = [
     "integration: needs real model weights (downloads them); run with NOENTENC_RUN_INTEGRATION=1",

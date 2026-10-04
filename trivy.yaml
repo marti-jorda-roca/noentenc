@@ -1,0 +1,27 @@
+# Shared by GitHub Actions and the local pre-commit hook.
+format: table
+exit-code: 1
+severity:
+  - HIGH
+  - CRITICAL
+timeout: 10m0s
+
+pkg:
+  include-dev-deps: true
+
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+  skip-dirs:
+    - .git
+    - .venv
+    - .cache
+    - .pytest_cache
+    - .ruff_cache
+    - .ty_cache
+    - build
+    - dist
+    - htmlcov
+    - "**/__pycache__"

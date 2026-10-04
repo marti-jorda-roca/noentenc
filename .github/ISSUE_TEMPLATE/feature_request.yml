@@ -1,0 +1,22 @@
+name: Feature request
+description: Propose a change to the library or a new model backend.
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: What are you trying to do, and what prevents you from doing it today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the API or behavior you want. For a new model, link its source and license.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include any existing backends or workarounds you tried.
