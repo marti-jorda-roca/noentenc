@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and model usage
+    url: https://github.com/marti-jorda-roca/noentenc/discussions
+    about: Ask about installation, language detection, translation, or model selection.
+  - name: Report a security vulnerability
+    url: https://github.com/marti-jorda-roca/noentenc/security/advisories/new
+    about: Report vulnerabilities privately. Do not post credentials or security details in public issues.

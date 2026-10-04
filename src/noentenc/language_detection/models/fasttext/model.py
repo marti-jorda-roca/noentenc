@@ -1,6 +1,9 @@
 """Pure-numpy inference for fastText language-identification models."""
 
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
+from itertools import repeat
 from pathlib import Path
 
 import numpy as np
@@ -9,10 +12,17 @@ from noentenc.language_detection._download import RemoteFile, fetch
 from noentenc.language_detection.models.base import BaseModel
 from noentenc.language_detection.models.fasttext import format as ftz
 from noentenc.language_detection.models.fasttext.format import Loss
-from noentenc.language_detection.models.fasttext.tokenizer import Tokenizer
+from noentenc.language_detection.models.fasttext.tokenizer import (
+    Tokenizer,
+    split_words,
+)
 
 # fastText's `std_log(x) = log(x + 1e-5)`, used along hierarchical-softmax paths.
 HS_LOG_EPSILON = 1e-5
+# exp(-x) overflows float32 past ~88; the sigmoid there is already 0 to float precision.
+SIGMOID_CLIP = 80.0
+# Marks the end of each text among the words looked up in the word cache.
+END_OF_TEXT = ""
 # fastText's one-vs-all loss uses a lookup-table sigmoid (`Loss::sigmoid` in loss.cc).
 SIGMOID_TABLE_SIZE = 512
 MAX_SIGMOID = 8.0
@@ -115,6 +125,10 @@ class FastTextModel(BaseModel):
     Probabilities: softmax models return the true softmax probabilities. Hierarchical-softmax
     models (lid.176) return fastText's path scores, ``exp(sum(log(p + 1e-5)))``, which is what
     ``fasttext.predict`` reports (clipped at 1); they don't sum exactly to 1.
+
+    ``cache_size`` is how many distinct words keep their summed input rows in memory
+    (``dim + 1`` floats each: 68 bytes for lid176, 1 KB for the 256-dim models), so repeated
+    words skip tokenization. ``None`` keeps every word, ``0`` none.
     """
 
     def __init__(
@@ -134,10 +148,13 @@ class FastTextModel(BaseModel):
         self._tokenizer = Tokenizer(weights, cache_size=cache_size)
         self._input = weights.input_matrix
         self._output = weights.output_matrix
+        self._words = _WordCache(self._word_vectors, self.args.dim + 1, cache_size)
         self._mapper = self._label_mapper(weights.labels)
         if self.args.loss == Loss.HS:
             right, left = _hs_path_matrices(weights.label_counts)
-            self._hs_internal = right.shape[0]
+            # Internal tree node `nlabels + i` uses output row i; the last row is unused.
+            # Negated, so `hidden @ _hs_negated.T` is the `-x` that the sigmoid needs.
+            self._hs_negated = -self._output[: right.shape[0]]
             self._hs_paths = np.concatenate((right, left), axis=0)
 
     @staticmethod
@@ -154,51 +171,86 @@ class FastTextModel(BaseModel):
     def hidden(self, texts: list[str]) -> np.ndarray:
         """Mean input-matrix row of each text, shape ``(len(texts), dim)``.
 
-        All rows of the batch are gathered with one fancy-index call and summed per text with
-        ``np.add.reduceat``.
+        Each distinct word is tokenized once, into the sum of its rows (see ``_WordCache``); a
+        text's hidden vector is then the sum over its words, its ``</s>`` row and its word n-grams,
+        divided by their total row count.
         """
-        rows: list[int] = []
-        offsets: list[int] = []
-        counts: list[int] = []
-        text_rows = self._tokenizer.text_rows
+        words: list[str] = []
+        starts: list[int] = []
         for text in texts:
-            offsets.append(len(rows))
-            # Only empty when the vocabulary lacks `</s>` (fastText would then predict
-            # nothing); a placeholder row keeps reduceat aligned.
-            ids = text_rows(text) or [0]
-            counts.append(len(ids))
-            rows.extend(ids)
-        sums = np.add.reduceat(self._input[rows], offsets, axis=0)
-        return sums / np.array(counts, dtype=np.float32)[:, None]
+            starts.append(len(words))
+            words += split_words(text)
+            words.append(END_OF_TEXT)
+        # Column `dim` of each word entry holds its row count.
+        summed = np.add.reduceat(self._words.lookup(words), starts, axis=0)
+        total, count = summed[:, :-1], summed[:, -1]
+        if self._tokenizer.word_ngrams > 1:
+            ends = [*starts[1:], len(words)]
+            ngrams = [
+                self._tokenizer.word_ngram_rows(words[a : b - 1])
+                for a, b in zip(starts, ends, strict=True)
+            ]
+            lengths = np.array([len(rows) for rows in ngrams])
+            flat = np.array([row for rows in ngrams for row in rows], dtype=np.intp)
+            total += _gather_sums(self._input, flat, lengths)
+            count += lengths
+        # No rows at all (only when the vocabulary lacks `</s>`, and fastText would then
+        # predict nothing): use row 0 so the scores stay finite.
+        if not count.all():
+            empty = count == 0
+            total[empty] = self._input[0]
+            count[empty] = 1
+        return total / count[:, None]
+
+    def _word_vectors(self, words: list[str]) -> np.ndarray:
+        """Summed input rows of each word (``""`` is a text's end), then its row count."""
+        owner, rows = self._tokenizer.word_rows_batch(words)
+        counts = np.bincount(owner, minlength=len(words))
+        out = np.empty((len(words), self.args.dim + 1), dtype=np.float32)
+        out[:, :-1] = _gather_sums(self._input, rows, counts)
+        out[:, -1] = counts
+        return out
 
     def _native_scores(self, hidden: np.ndarray) -> np.ndarray:
         """Per-label probabilities (or hs path scores) on the model's native label axis."""
-        logits = hidden @ self._output.T
         if self.args.loss == Loss.HS:
             # The +1e-5 per step can push a near-certain leaf a hair above 1.
-            return np.minimum(np.exp(self._hs_log_scores(logits)), 1.0)
+            return np.minimum(np.exp(self._hs_log_scores(hidden)), 1.0)
+        logits = hidden @ self._output.T
         if self.args.loss == Loss.SOFTMAX:
             return _softmax(logits)
         # One-vs-all and negative-sampling models score each label independently.
         return _table_sigmoid(logits)
 
-    def _hs_log_scores(self, logits: np.ndarray) -> np.ndarray:
-        """Log path score of every leaf, in one matmul against the stacked path matrices."""
-        # Internal tree node `nlabels + i` uses output row i; the last row is unused.
-        sig = _sigmoid(logits[:, : self._hs_internal])
-        branch = np.log(np.concatenate((sig, 1.0 - sig), axis=1) + HS_LOG_EPSILON)
-        return branch @ self._hs_paths
+    def _hs_log_scores(self, hidden: np.ndarray) -> np.ndarray:
+        """Log path score of every leaf, in one matmul against the stacked path matrices.
+
+        Like fastText, the left branch is ``log(1 - f + eps)`` with ``f`` the float32 sigmoid,
+        not the more precise ``sigmoid(-x)``, so scores match ``fasttext.predict``.
+        """
+        negated = hidden @ self._hs_negated.T
+        internal = negated.shape[1]
+        branch = np.empty((len(hidden), 2 * internal), dtype=negated.dtype)
+        right, left = branch[:, :internal], branch[:, internal:]
+        # sigmoid(x) = 1 / (1 + exp(-x)); exp overflows float32 past ~88, where the
+        # sigmoid is already 0 to float precision.
+        np.exp(np.minimum(negated, SIGMOID_CLIP, out=negated), out=right)
+        right += 1.0
+        np.reciprocal(right, out=right)
+        np.subtract(1.0, right, out=left)
+        branch += HS_LOG_EPSILON
+        return np.log(branch, out=branch) @ self._hs_paths
 
     def _predict_chunk(self, texts: list[str]) -> list[str]:
         hidden = self.hidden(texts)
-        if self._mapper.identity:
-            # exp, softmax and sigmoid are monotonic: rank on raw logits / log path scores.
-            logits = hidden @ self._output.T
-            scores = (
-                self._hs_log_scores(logits) if self.args.loss == Loss.HS else logits
-            )
-        else:
+        if not self._mapper.identity:
             scores = self._mapper.reduce(self._native_scores(hidden))
+        elif self.args.loss == Loss.HS:
+            # exp is monotonic: rank on log path scores.
+            scores = self._hs_log_scores(hidden)
+        else:
+            # softmax and sigmoid are monotonic: rank on raw logits.
+            scores = hidden @ self._output.T
         return self._mapper.top_label(scores.argmax(axis=1))
 
     def _predict_score_chunk(
@@ -213,8 +265,93 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     return z / z.sum(axis=1, keepdims=True)
 
 
-def _sigmoid(x: np.ndarray) -> np.ndarray:
-    return 1.0 / (1.0 + np.exp(-x))
+def _gather_sums(
+    matrix: np.ndarray, rows: np.ndarray, lengths: np.ndarray
+) -> np.ndarray:
+    """Sum ``matrix[rows]`` over consecutive runs, ``lengths[i]`` rows for run ``i`` (may be 0).
+
+    Runs of equal length are summed together as one ``(runs, length, dim)`` block, row by row in
+    order. That is several times faster than ``np.add.reduceat`` over the gathered rows, which
+    handles wide rows split into many short runs poorly.
+    """
+    out = np.zeros((len(lengths), matrix.shape[1]), dtype=matrix.dtype)
+    if not len(lengths):
+        return out
+    starts = np.cumsum(lengths) - lengths
+    order = np.argsort(lengths, kind="stable")
+    by_length = lengths[order]
+    bounds = [*np.flatnonzero(np.diff(by_length)).tolist(), len(order) - 1]
+    first = 0
+    for last in bounds:
+        length = int(by_length[last])
+        if length:
+            runs = order[first : last + 1]
+            block = rows[starts[runs, None] + np.arange(length)]
+            out[runs] = matrix[block].sum(axis=1)
+        first = last + 1
+    return out
+
+
+class _WordCache:
+    """Per-word entries computed once and reused: here, summed input rows plus a row count.
+
+    ``compute`` fills in the words a lookup hasn't seen, all in one call. Once ``capacity``
+    words are stored the cache empties and starts over, which is cheaper than LRU bookkeeping
+    and bounds memory to ``capacity`` entries. ``None`` never evicts; ``0`` never stores.
+    """
+
+    def __init__(
+        self,
+        compute: Callable[[list[str]], np.ndarray],
+        width: int,
+        capacity: int | None,
+    ) -> None:
+        self._compute = compute
+        self._capacity = capacity
+        self._slots: dict[str, int] = {}
+        self._table = np.empty((0, width), dtype=np.float32)
+        # Lookups mutate the table, so concurrent callers take turns.
+        self._lock = threading.Lock()
+
+    def lookup(self, words: list[str]) -> np.ndarray:
+        """The entries of ``words``, one row per word."""
+        n = len(words)
+        with self._lock:
+            slots = self._slots
+            at = np.fromiter(map(slots.get, words, repeat(-1)), np.intp, n)
+            miss = np.flatnonzero(at < 0)
+            if len(miss):
+                missed = list(map(words.__getitem__, miss.tolist()))
+                missing = list(dict.fromkeys(missed))
+                capacity = self._capacity
+                if capacity is not None and len(slots) + len(missing) > capacity:
+                    slots.clear()
+                    missed = words
+                    missing = list(dict.fromkeys(words))
+                    miss = np.arange(n)
+                    if len(missing) > capacity:
+                        index = dict(zip(missing, range(len(missing)), strict=True))
+                        at = np.fromiter(map(index.__getitem__, words), np.intp, n)
+                        return self._compute(missing)[at]
+                self._store(missing)
+                at[miss] = np.fromiter(
+                    map(slots.__getitem__, missed), np.intp, len(miss)
+                )
+            return self._table[at]
+
+    def _store(self, words: list[str]) -> None:
+        entries = self._compute(words)
+        start = len(self._slots)
+        end = start + len(words)
+        if end > len(self._table):
+            size = max(end, 2 * len(self._table))
+            if self._capacity is not None:
+                size = min(size, self._capacity)
+            grown = np.empty((size, self._table.shape[1]), dtype=self._table.dtype)
+            grown[:start] = self._table[:start]
+            self._table = grown
+        self._table[start:end] = entries
+        self._slots.update(zip(words, range(start, end), strict=True))
 
 
 def _table_sigmoid(x: np.ndarray) -> np.ndarray:

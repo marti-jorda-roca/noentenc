@@ -19,22 +19,8 @@ Translator().translate("The weather is nice today.", Language.SPANISH, Language.
 # 'El tiempo es bueno hoy.'
 ```
 
-- **Fast.** The default detector labels about 350,000 texts per second on a laptop CPU, and a direct Opus-MT translation takes about 60 ms per sentence. See [benchmarks](docs/benchmarks.md).
-
-  | Task | Model | Single input | Batched |
-  |---|---|---:|---:|
-  | Detection | heliport | 4 µs | 872k texts/s |
-  | Detection | **lid176 (default)** | 17 µs | 356k texts/s |
-  | Detection | cld3 | 16 µs | 66k texts/s |
-  | Detection | lingua | 0.44 ms | 9k texts/s |
-  | Detection | bert-openlid | 0.35 ms | 3.5k texts/s |
-  | Translation (en→es) | **Opus-MT (default for direct pairs)** | 63 ms | 100 sent/s |
-  | Translation (en→es) | **SMaLL-100 (default otherwise)** | 52 ms | 75 sent/s |
-  | Translation (en→es) | M2M100 418M | 231 ms | 15 sent/s |
-  | Translation (en→es) | NLLB-200 600M (int8) | 770 ms | 10 sent/s |
-
-  Apple M3, batches of 256 texts for detection and 32 sentences for translation.
-
+- **Fast.** Detects a language in as little as 2.5 µs and translates a sentence in about 52 ms, on a laptop CPU. See [benchmarks](docs/benchmarks.md).
+- **Faster than the originals.** Up to 470× faster than `langid.py`, 2× faster than the C++ `fasttext` package and 5.8× faster than transformers + PyTorch, with the same accuracy. See [the comparison](docs/benchmarks.md#against-the-original-implementations).
 - **Small.** The default detection model is 0.9 MB. noentenc has no torch, transformers or GPU dependency, only numpy, onnxruntime, tokenizers, huggingface-hub and tqdm.
 - **One API, many models.** 12 detection models and 4 translation model families sit behind the same two classes. Swapping one is a one-line change, and every detector returns the same ISO 639-3 labels.
 - **Built for datasets.** You can pass a single string, a list or a pandas or polars column.
@@ -42,6 +28,13 @@ Translator().translate("The weather is nice today.", Language.SPANISH, Language.
 ## Install
 
 noentenc uses [uv](https://docs.astral.sh/uv/) to manage dependencies.
+
+Requires Python 3.14 or newer. Install with pip or uv:
+
+```bash
+pip install noentenc
+pip install 'noentenc[all]'
+```
 
 ```bash
 uv add noentenc                  # fastText, ONNX and langid detection + every translation model
@@ -170,4 +163,4 @@ make unit-tests
 make integration-tests   # tests/integrations; downloads real weights
 ```
 
-`scripts/benchmark_lid.py` and `scripts/benchmark_translation.py` reproduce the speed numbers. `scripts/make_fasttext_fixtures.py` regenerates the fastText parity fixtures with the reference `fasttext` package. That package needs Python 3.12, and the script's docstring has the command. `scripts/make_langid_fixtures.py` does the same for langid with the reference `langid` package.
+`scripts/benchmark_lid.py` and `scripts/benchmark_translation.py` reproduce the speed numbers, and `scripts/benchmark_vs_reference.py` the comparison with the original implementations. `scripts/make_fasttext_fixtures.py` regenerates the fastText parity fixtures with the reference `fasttext` package. That package needs Python 3.12, and the script's docstring has the command. `scripts/make_langid_fixtures.py` does the same for langid with the reference `langid` package.

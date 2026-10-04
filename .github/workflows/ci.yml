@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_NO_PROGRESS: "1"
+
+jobs:
+  security:
+    name: Trivy security scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan dependencies, secrets, and configuration
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.75.0
+          scan-type: fs
+          scan-ref: .
+          trivy-config: trivy.yaml
+
+  lint:
+    name: Ruff and ty
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.22"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
+      - run: uv python install
+      - run: uv sync --locked --all-extras --group dev
+      - run: uv run --no-sync ruff check . --output-format=github
+      - run: uv run --no-sync ruff format --check .
+      - run: uv run --no-sync ty check --output-format=github
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.22"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
+      - run: uv python install
+      - run: uv sync --locked --all-extras --group dev
+      - run: uv run --no-sync coverage run -m pytest tests/unit --strict-config --strict-markers -v --tb=short
+      - run: uv run --no-sync coverage report
+
+  integration-tests:
+    name: Integration tests / ${{ matrix.suite }}
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [language_detection, translation]
+    env:
+      NOENTENC_RUN_INTEGRATION: "1"
+      # Keep numpy and ONNX inference within the standard runner's CPU allocation.
+      OMP_NUM_THREADS: "4"
+      OPENBLAS_NUM_THREADS: "4"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.22"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
+      - run: uv python install
+      - run: uv sync --locked --group dev
+      - run: uv run --no-sync pytest tests/integrations/${{ matrix.suite }} --strict-config --strict-markers -v --tb=short
+        env:
+          NOENTENC_CACHE: ${{ runner.temp }}/noentenc
+          HF_HOME: ${{ runner.temp }}/huggingface
+
+  build:
+    name: Build and check distributions
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.22"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
+      - run: uv python install
+      - name: Check release tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          uv run --no-project python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          if not re.fullmatch(r"v\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?", tag):
+              raise SystemExit(f"Unsupported release tag: {tag}")
+          if tag != f"v{version}":
+              raise SystemExit(f"Tag {tag} does not match package version {version}")
+          PY
+      - run: uv build --no-sources
+      - run: uvx --from 'twine>=6,<7' twine check --strict dist/*
+      - name: Smoke test wheel and source distribution in isolated environments
+        run: |
+          for distribution in dist/*.whl dist/*.tar.gz; do
+            uv run --no-project --isolated --with "$distribution" python -I -c \
+              'from noentenc import Language; from noentenc.language_detection import LanguageDetector; from noentenc.translation import Translator; from importlib.metadata import version; print(version("noentenc"))'
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 3
