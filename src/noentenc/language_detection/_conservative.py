@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from noentenc._batching import check_int
 from noentenc.language_detection._content import count_letters
 from noentenc.language_detection.labels import (
     NO_LINGUISTIC_CONTENT,
@@ -65,7 +66,7 @@ class Policy:
     ) -> None:
         self.min_score = _check_threshold("min_score", min_score)
         self.min_margin = _check_threshold("min_margin", min_margin)
-        self.min_letters = _check_min_letters(min_letters)
+        self.min_letters = check_int("min_letters", min_letters, optional=True)
         self.candidates = _check_candidates(model, candidates)
 
     @property
@@ -125,18 +126,6 @@ def _check_threshold(name: str, value: object) -> float | None:
     if value < 0:
         raise ValueError(f"{name} must be >= 0, got {value}")
     return float(value)
-
-
-def _check_min_letters(value: object) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(
-            f"min_letters must be an int or None, got {type(value).__name__}"
-        )
-    if value < 1:
-        raise ValueError(f"min_letters must be >= 1, got {value}")
-    return value
 
 
 def _check_candidates(

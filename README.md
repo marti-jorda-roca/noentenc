@@ -51,7 +51,7 @@ With pip, the same extras work: `pip install 'noentenc[translation]'`.
 
 Python 3.10 isn't supported: onnxruntime 1.30, pandas 3 and the current numpy releases have no Python 3.10 wheels.
 
-Weights download on first use, to `~/.cache/noentenc` for detection and the Hugging Face cache for translation. Nothing is bundled in the wheel. To run offline, download them ahead of time with `noentenc.prepare(...)` and pass `only_local_files=True`; see [Run offline](docs/quickstart.md#run-offline).
+Weights download on first use, to `~/.cache/noentenc` (`NOENTENC_CACHE` or `cache_dir` move it). Nothing is bundled in the wheel. To run offline, download them ahead of time with `noentenc.prepare(...)` and pass `only_local_files=True`; see [Run offline](docs/quickstart.md#run-offline).
 
 ## Detect a language
 

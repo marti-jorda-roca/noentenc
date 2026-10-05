@@ -2,12 +2,18 @@
 
 import json
 import struct
+from functools import cache
 from pathlib import Path
 
 import numpy as np
 
+from noentenc.language_detection.labels import NO_LINGUISTIC_CONTENT, UNDETERMINED
 from noentenc.language_detection.models.fasttext import FastTextModel
 from noentenc.language_detection.models.fasttext.format import Loss
+from noentenc.language_detection.models.fasttext.tokenizer import (
+    Tokenizer,
+    split_words,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 FASTTEXT_FIXTURES = FIXTURES / "fasttext"
@@ -18,6 +24,23 @@ FASTTEXT_EXPECTED = json.loads(
 # fastText reports p + 1e-5 for softmax/one-vs-all; hierarchical softmax scores are compared as-is.
 FASTTEXT_OFFSET = 1e-5
 ATOL = 2e-6
+
+
+@cache
+def valid_iso639_3_codes() -> frozenset[str]:
+    """Every current ISO 639-3 code (``scripts/build_iso639_tables.py``), ``und`` and ``zxx``."""
+    codes = (FIXTURES / "iso639_3.txt").read_text(encoding="utf-8").split()
+    return frozenset(codes) | {UNDETERMINED, NO_LINGUISTIC_CONTENT}
+
+
+def text_rows(tokenizer: Tokenizer, text: str) -> list[int]:
+    """Input-matrix rows of ``text`` one word at a time: the reference for the batched path."""
+    words = split_words(text)
+    rows = [row for word in words for row in tokenizer.word_rows(word)]
+    rows += tokenizer.eos_rows
+    if tokenizer.word_ngrams > 1:
+        rows += tokenizer.word_ngram_rows(words)
+    return rows
 
 
 def load_sentences() -> list[str]:

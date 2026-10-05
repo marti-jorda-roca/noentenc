@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from noentenc._plan import Constraints, Plan
-from noentenc.languages import Language, UnsupportedLanguageError, to_language
+from noentenc.languages import Language, to_language
 from noentenc.profiles import Profile
-from noentenc.translation._routing import ModelChoice, choose
+from noentenc.translation._routing import ModelChoice, auto_choices, choose
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable
     from pathlib import Path
 
 # A translation pair to prepare: (source, target). A `None` source is translation
@@ -114,36 +113,24 @@ def _select(
     profile = Profile(profile)
     constraints = Constraints.of(allowed_licenses, max_download_bytes)
     requests = [_request(source, target) for source, target in translation]
-    detect = detection or any(source == _AUTO for source, _ in requests)
+    detect = detection or any(auto for _, _, auto in requests)
     choices = dict.fromkeys(
         choice
-        for source, target in requests
-        for choice in _choices(profile, source, target, constraints)
+        for source, target, auto in requests
+        for choice in (
+            auto_choices(profile, target, constraints)
+            if auto
+            else [choose(profile, source, target, constraints)]
+        )
     )
     return profile, constraints, detect, list(choices)
 
 
 def _request(
     source: Language | str | None, target: Language | str
-) -> tuple[Language | str | None, Language]:
-    """`(source, target)` with both as `Language`s, except a `None` or `"auto"` source."""
-    if source is not None and source != _AUTO:
-        source = to_language(source)
-    return source, to_language(target)
-
-
-def _choices(
-    profile: Profile,
-    source: Language | str | None,
-    target: Language,
-    constraints: Constraints,
-) -> Iterator[ModelChoice]:
-    if source != _AUTO:
-        source = source if source is None else to_language(source)
-        yield choose(profile, source, target, constraints)
-        return
-    # Every language a detector may report, and the fallback without a source.
-    for candidate in (None, *Language):
-        if candidate != target:
-            with suppress(UnsupportedLanguageError):
-                yield choose(profile, candidate, target, constraints)
+) -> tuple[Language | None, Language, bool]:
+    """`(source, target, auto)` as `Language`s; the source is None when not given or `"auto"`."""
+    auto = source == _AUTO
+    if source is None or auto:
+        return None, to_language(target), auto
+    return to_language(source), to_language(target), False

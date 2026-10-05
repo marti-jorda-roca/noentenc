@@ -1,7 +1,7 @@
 """End-to-end translations with real weights.
 
 They run when NOENTENC_RUN_INTEGRATION=1 (downloading weights) or when the weights are
-already in the Hugging Face cache; otherwise they are skipped.
+already in the noentenc cache; otherwise they are skipped.
 """
 
 import os

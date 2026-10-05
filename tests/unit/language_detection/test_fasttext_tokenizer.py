@@ -13,6 +13,7 @@ from noentenc.language_detection.models.fasttext.tokenizer import (
     fnv1a_32,
     split_words,
 )
+from tests.unit.language_detection.helpers import text_rows
 
 
 def _weights(
@@ -108,8 +109,8 @@ def test_text_rows_in_vocab_oov_eos_and_label_tokens() -> None:
     tok = Tokenizer(_weights([EOS, "hi"]), cache_size=0)
     hi = tok.subword_rows("hi")
     oov = tok.subword_rows("yo")
-    assert tok.text_rows("hi yo __label__x") == [1, *hi, *oov, 0]
-    assert tok.text_rows("") == [0]
+    assert text_rows(tok, "hi yo __label__x") == [1, *hi, *oov, 0]
+    assert text_rows(tok, "") == [0]
 
 
 def test_pruned_models_remap_and_drop_hashes() -> None:
@@ -131,7 +132,7 @@ def test_word_ngrams_follow_fasttext_hashing() -> None:
     expected = [
         ((hashes[i] & mask) * 116049371 + hashes[i + 1]) & mask for i in range(2)
     ]
-    rows = tok.text_rows("a b")
+    rows = text_rows(tok, "a b")
     assert rows[-2:] == [1 + h % 1000 for h in expected]
 
 

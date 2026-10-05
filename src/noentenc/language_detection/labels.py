@@ -1,7 +1,6 @@
 """Normalise every backend's language labels to ISO 639-3."""
 
 from collections.abc import Mapping, Sequence
-from functools import cache
 
 import numpy as np
 
@@ -9,7 +8,6 @@ from noentenc.language_detection._iso639 import (
     INDIVIDUAL_TO_MACRO,
     PART1_TO_PART3,
     RETIRED_TO_CURRENT,
-    VALID_PART3,
 )
 
 UNDETERMINED = "und"
@@ -58,12 +56,6 @@ def normalize_label(
     if not normalize:
         return label.removeprefix(FASTTEXT_LABEL_PREFIX)
     return to_iso639_3(label, collapse_macrolanguages=collapse_macrolanguages)
-
-
-@cache
-def valid_iso639_3_codes() -> frozenset[str]:
-    """Every current ISO 639-3 code, plus ``und`` and ``zxx``."""
-    return frozenset(VALID_PART3.split()) | {UNDETERMINED, NO_LINGUISTIC_CONTENT}
 
 
 class LabelMapper:

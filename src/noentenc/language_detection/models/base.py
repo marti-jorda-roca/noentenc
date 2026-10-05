@@ -4,6 +4,8 @@ from functools import cached_property
 from pathlib import Path
 from typing import TypeVar
 
+import numpy as np
+
 from noentenc._batching import check_batch_size, is_blank
 from noentenc.language_detection._content import has_linguistic_content
 from noentenc.language_detection.labels import (
@@ -140,6 +142,12 @@ def rule_label(text: str) -> str | None:
     if not has_linguistic_content(text):
         return NO_LINGUISTIC_CONTENT
     return None
+
+
+def softmax(logits: np.ndarray) -> np.ndarray:
+    """Row-wise softmax of a ``(batch, labels)`` array."""
+    z = np.exp(logits - logits.max(axis=1, keepdims=True))
+    return z / z.sum(axis=1, keepdims=True)
 
 
 _T = TypeVar("_T")

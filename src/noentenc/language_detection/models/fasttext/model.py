@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from noentenc.language_detection._download import RemoteFile, fetch
-from noentenc.language_detection.models.base import BaseModel
+from noentenc.language_detection.models.base import BaseModel, softmax
 from noentenc.language_detection.models.fasttext import format as ftz
 from noentenc.language_detection.models.fasttext.format import Loss
 from noentenc.language_detection.models.fasttext.tokenizer import (
@@ -237,7 +237,7 @@ class FastTextModel(BaseModel):
             return np.minimum(np.exp(self._hs_log_scores(hidden)), 1.0)
         logits = hidden @ self._output.T
         if self.args.loss == Loss.SOFTMAX:
-            return _softmax(logits)
+            return softmax(logits)
         # One-vs-all and negative-sampling models score each label independently.
         return _table_sigmoid(logits)
 
@@ -277,11 +277,6 @@ class FastTextModel(BaseModel):
     ) -> list[dict[str, float]]:
         unified = self._mapper.reduce(self._native_scores(self.hidden(texts)))
         return self._mapper.to_dicts(unified, top_k)
-
-
-def _softmax(logits: np.ndarray) -> np.ndarray:
-    z = np.exp(logits - logits.max(axis=1, keepdims=True))
-    return z / z.sum(axis=1, keepdims=True)
 
 
 def _gather_sums(

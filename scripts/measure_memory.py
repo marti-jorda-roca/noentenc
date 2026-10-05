@@ -10,7 +10,7 @@ Every measurement runs in a fresh process, so models don't share memory between 
   pair, for several `max_loaded_models` limits: peak resident memory, final resident memory
   and wall time (which includes reloading evicted models).
 
-Uses the Hugging Face cache, downloading the models it lacks. Needs psutil:
+Uses the noentenc cache, downloading the models it lacks. Needs psutil:
 
     uv run --with psutil python scripts/measure_memory.py models
     uv run --with psutil python scripts/measure_memory.py workload

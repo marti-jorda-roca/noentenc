@@ -5,10 +5,9 @@ from noentenc.language_detection.labels import (
     LabelMapper,
     normalize_scores,
     to_iso639_3,
-    valid_iso639_3_codes,
 )
 from noentenc.language_detection.models.heliport_model import heliport_code
-from tests.unit.language_detection.helpers import FIXTURES
+from tests.unit.language_detection.helpers import FIXTURES, valid_iso639_3_codes
 
 # Labels that are not (current) ISO 639-3 individual/macro codes but are what the model emits:
 # GlotLID's `daf` (retired by a split) and `oto` (an ISO 639-5 family code).

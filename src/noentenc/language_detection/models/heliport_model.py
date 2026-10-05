@@ -1,24 +1,20 @@
 """heliport backend: a Rust port of HeLI-OTS (220 languages). GPL-3.0; no Windows wheels."""
 
 from noentenc._optional import require
-from noentenc.language_detection.labels import (
-    NO_LINGUISTIC_CONTENT,
-    UNDETERMINED,
-    valid_iso639_3_codes,
-)
+from noentenc.language_detection.labels import NO_LINGUISTIC_CONTENT, UNDETERMINED
 from noentenc.language_detection.models.base import BaseModel
 
 _ISO_LENGTH = 3
 
 
 def heliport_code(raw: str) -> str:
-    """heliport has a few internal sub-labels (``hbsbos``, ``msazsm``, ``finl``); keep the ISO code inside."""
-    if len(raw) == _ISO_LENGTH:
-        return raw
-    valid = valid_iso639_3_codes()
-    suffix = raw[_ISO_LENGTH:]
-    if len(suffix) == _ISO_LENGTH and suffix in valid:
-        return suffix
+    """The ISO code in one of heliport's sub-labels.
+
+    A macrolanguage followed by one of its languages (``hbsbos``, ``msazsm``) is that
+    language; any other sub-label (``finl``, ``msamalay``, ``undhtml``) is its prefix.
+    """
+    if len(raw) == 2 * _ISO_LENGTH:
+        return raw[_ISO_LENGTH:]
     return raw[:_ISO_LENGTH]
 
 

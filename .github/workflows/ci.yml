@@ -132,7 +132,7 @@ jobs:
           wheel=$(ls dist/*.whl)
           uv run --no-project --isolated --with "noentenc[translation] @ $wheel" python scripts/smoke_quickstart.py translation
         env:
-          HF_HOME: ${{ runner.temp }}/huggingface
+          NOENTENC_CACHE: ${{ runner.temp }}/noentenc
 
   integration-tests:
     name: Integration tests / ${{ matrix.suite }}
@@ -163,7 +163,6 @@ jobs:
       - run: uv run --no-sync pytest tests/integrations/${{ matrix.suite }} --strict-config --strict-markers -v --tb=short
         env:
           NOENTENC_CACHE: ${{ runner.temp }}/noentenc
-          HF_HOME: ${{ runner.temp }}/huggingface
 
   build:
     name: Build and check distributions

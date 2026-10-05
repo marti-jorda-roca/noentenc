@@ -7,6 +7,7 @@ from noentenc.language_detection.models.fasttext.format import Loss
 from tests.unit.language_detection.helpers import (
     dense_block,
     quant_block,
+    text_rows,
     write_fasttext_model,
 )
 
@@ -39,7 +40,7 @@ def test_dense_model_roundtrip_and_prediction(tmp_path, rng) -> None:  # noqa: A
     np.testing.assert_array_equal(weights.output_matrix, w_out)
 
     model = FastTextModel(path, normalize_labels=False)
-    rows = model._tokenizer.text_rows("hello there")
+    rows = text_rows(model._tokenizer, "hello there")
     hidden = w_in[rows].mean(axis=0)
     logits = w_out @ hidden
     probs = np.exp(logits - logits.max())

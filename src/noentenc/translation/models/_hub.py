@@ -9,15 +9,15 @@ def resolve_files(
     only_local_files: bool = False,
     revision: str | None = None,
     *,
-    cache_dir: Path | None = None,
+    cache_dir: Path,
     force: bool = False,
 ) -> dict[str, Path]:
     """Map each relative filename to a local path.
 
     `model` is either a local directory or a Hugging Face repo id. For a repo,
     only the requested files are downloaded at `revision` (a commit; `None` means
-    the latest) into `cache_dir` (`None`: Hugging Face's default cache), or read from
-    that cache when `only_local_files` is set. `force` downloads them again.
+    the latest) into the Hugging Face cache `cache_dir`, or read from it when
+    `only_local_files` is set. `force` downloads them again.
     """
     local_dir = Path(model)
     if local_dir.is_dir():
@@ -43,9 +43,8 @@ def resolve_files(
         except FileNotFoundError as error:  # LocalEntryNotFoundError, offline only
             if not only_local_files:
                 raise
-            where = cache_dir or "the Hugging Face cache"
             raise FileNotFoundError(
-                f"{model}/{name} (revision {revision or 'latest'}) is not in {where} and "
+                f"{model}/{name} (revision {revision or 'latest'}) is not in {cache_dir} and "
                 "only_local_files=True. Download it first with noentenc.prepare(...) "
                 "using the same cache directory, or copy a prepared cache there."
             ) from error

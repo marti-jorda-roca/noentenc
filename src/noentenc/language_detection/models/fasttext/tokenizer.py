@@ -13,8 +13,8 @@ A text becomes the list of input-matrix rows whose mean is the hidden vector:
 One deliberate difference: fastText stops reading at the first newline, silently ignoring the rest
 of the text, so here newlines are treated as ordinary spaces.
 
-``word_rows_batch`` hashes the n-grams of many words at once with numpy; ``subword_rows`` and
-``text_rows`` are the plain per-word versions of the same rules.
+``word_rows_batch`` hashes the n-grams of many words at once with numpy; ``word_rows`` and
+``subword_rows`` are the plain per-word versions of the same rules.
 """
 
 import functools
@@ -125,17 +125,6 @@ class Tokenizer:
                 np.fromiter(self.pruneidx.values(), np.int64, len(self.pruneidx))
             )
             self._prune_table = table
-
-    def text_rows(self, text: str) -> list[int]:
-        """Input-matrix rows for ``text`` (never empty: ``</s>`` is always appended)."""
-        rows: list[int] = []
-        words = split_words(text)
-        for word in words:
-            rows.extend(self.word_rows(word))
-        rows.extend(self.eos_rows)
-        if self.word_ngrams > 1:
-            rows.extend(self.word_ngram_rows(words))
-        return rows
 
     def word_rows(self, word: str) -> tuple[int, ...]:
         """Rows of one word: its own row if in the vocabulary, then its character n-grams."""

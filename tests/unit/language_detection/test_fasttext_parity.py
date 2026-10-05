@@ -11,6 +11,7 @@ from tests.unit.language_detection.helpers import (
     FASTTEXT_EXPECTED,
     FASTTEXT_FIXTURES,
     assert_fasttext_parity,
+    text_rows,
 )
 
 TINY_MODELS = sorted(name for name in FASTTEXT_EXPECTED if name.startswith("tiny-"))
@@ -37,7 +38,7 @@ def test_word_cache_sizes_give_the_same_hidden_vectors(
     model = FastTextModel(FASTTEXT_FIXTURES / name, cache_size=cache_size)
     tok = model._tokenizer
     expected = np.stack(
-        [model._input[tok.text_rows(s) or [0]].mean(0) for s in sentences]
+        [model._input[text_rows(tok, s) or [0]].mean(0) for s in sentences]
     )
     # Twice, so the second pass reads the words the first one cached (or evicted).
     for _ in range(2):

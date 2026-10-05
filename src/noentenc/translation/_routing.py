@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -179,3 +179,21 @@ def choose(
     raise UnsupportedLanguageError(
         f"No {profile} model translates {pair}; pass a model explicitly"
     )
+
+
+def auto_choices(
+    profile: Profile, target: Language, constraints: Constraints | None = None
+) -> Iterator[ModelChoice]:
+    """The model for each language a detector may report, and the fallback without one.
+
+    These are the models `source_language="auto"` may route to; languages without an
+    allowed model are skipped. A model can come up more than once.
+    """
+    for source in (None, *Language):
+        if source == target:
+            continue
+        try:
+            choice = choose(profile, source, target, constraints)
+        except UnsupportedLanguageError:
+            continue
+        yield choice
