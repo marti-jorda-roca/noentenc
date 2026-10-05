@@ -1,10 +1,11 @@
-"""Download the weights a profile needs ahead of time, so deployments can run offline."""
+"""Plan and download the weights a profile needs ahead of time, e.g. to run offline."""
 
 from __future__ import annotations
 
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
+from noentenc._plan import Constraints, Plan
 from noentenc.languages import Language, UnsupportedLanguageError, to_language
 from noentenc.profiles import Profile
 from noentenc.translation._routing import ModelChoice, choose
@@ -20,6 +21,31 @@ Pair = tuple[Language | str | None, Language | str]
 _AUTO = "auto"
 
 
+def plan(
+    profile: Profile | str = Profile.SPEED,
+    *,
+    detection: bool = True,
+    translation: Iterable[Pair] = (),
+    cache_dir: str | Path | None = None,
+    allowed_licenses: Iterable[str] | None = None,
+    max_download_bytes: int | None = None,
+) -> Plan:
+    """What `prepare` with the same arguments would download, without downloading it.
+
+    Each model comes with its licence, download size, memory and whether it is cached.
+    Raises `ModelConstraintError` when a requested pair or the detector has no model
+    that meets `allowed_licenses` and `max_download_bytes`.
+    """
+    from noentenc.language_detection.base import check_profile_plan
+
+    profile, constraints, detect, choices = _select(
+        profile, detection, translation, allowed_licenses, max_download_bytes
+    )
+    models = [check_profile_plan(profile, constraints, cache_dir)] if detect else []
+    models += [choice.plan(cache_dir) for choice in choices]
+    return Plan(tuple(models))
+
+
 def prepare(
     profile: Profile | str = Profile.SPEED,
     *,
@@ -27,6 +53,8 @@ def prepare(
     translation: Iterable[Pair] = (),
     cache_dir: str | Path | None = None,
     force: bool = False,
+    allowed_licenses: Iterable[str] | None = None,
+    max_download_bytes: int | None = None,
 ) -> list[Path]:
     """Download what `LanguageDetector(profile)` and `Translator(profile)` would load.
 
@@ -34,7 +62,7 @@ def prepare(
     `(source, target)` pairs to translate; each downloads the model the profile picks
     for it, without loading it. A source of `"auto"` downloads the detection model and
     every model the profile could pick for a detected language into that target: for
-    English at `speed`, 25 Opus-MT pairs and SMaLL-100, about 7.8 GB. Files go to
+    English at `speed`, 25 Opus-MT pairs and SMaLL-100, 7.9 GB. Files go to
     `cache_dir` (see `noentenc._cache` for the default), where the same classes then
     find them with `only_local_files=True`:
 
@@ -42,29 +70,57 @@ def prepare(
         LanguageDetector(only_local_files=True, cache_dir="/models")
         Translator(only_local_files=True, cache_dir="/models")
 
+    `allowed_licenses` and `max_download_bytes` pick models as the same arguments to
+    `Translator` and `LanguageDetector` do, and raise `ModelConstraintError` before
+    anything downloads when a pair has no allowed model. `plan(...)` with the same
+    arguments says what would be downloaded.
+
     Cached files are reused; checksummed detection files are checked and downloaded
     again if they don't match. `force` downloads everything again, which also replaces
     a corrupt file. Returns the local path of every file.
     """
-    profile = Profile(profile)
-    requests = [_request(source, target) for source, target in translation]
-    paths: list[Path] = []
-    if detection or any(source == _AUTO for source, _ in requests):
-        from noentenc.language_detection._download import fetch
-        from noentenc.language_detection.base import profile_remote_files
+    from noentenc.language_detection._download import fetch
+    from noentenc.language_detection.base import (
+        check_profile_plan,
+        profile_remote_files,
+    )
 
+    profile, constraints, detect, choices = _select(
+        profile, detection, translation, allowed_licenses, max_download_bytes
+    )
+    paths: list[Path] = []
+    if detect:
+        check_profile_plan(profile, constraints, cache_dir)
         paths += [
             fetch(remote, cache_dir=cache_dir, force=force, verify=True)
             for remote in profile_remote_files(profile)
         ]
-    choices = dict.fromkeys(
-        choice
-        for source, target in requests
-        for choice in _choices(profile, source, target)
-    )
     for choice in choices:
         paths += choice.download(cache_dir=cache_dir, force=force).values()
     return list(dict.fromkeys(paths))
+
+
+def _select(
+    profile: Profile | str,
+    detection: bool,
+    translation: Iterable[Pair],
+    allowed_licenses: Iterable[str] | None,
+    max_download_bytes: int | None,
+) -> tuple[Profile, Constraints, bool, list[ModelChoice]]:
+    """The profile, constraints, whether detection is needed, and the translation models.
+
+    Every choice is made, and every constraint checked, before anything downloads.
+    """
+    profile = Profile(profile)
+    constraints = Constraints.of(allowed_licenses, max_download_bytes)
+    requests = [_request(source, target) for source, target in translation]
+    detect = detection or any(source == _AUTO for source, _ in requests)
+    choices = dict.fromkeys(
+        choice
+        for source, target in requests
+        for choice in _choices(profile, source, target, constraints)
+    )
+    return profile, constraints, detect, list(choices)
 
 
 def _request(
@@ -77,13 +133,17 @@ def _request(
 
 
 def _choices(
-    profile: Profile, source: Language | str | None, target: Language
+    profile: Profile,
+    source: Language | str | None,
+    target: Language,
+    constraints: Constraints,
 ) -> Iterator[ModelChoice]:
     if source != _AUTO:
-        yield choose(profile, source if source is None else to_language(source), target)
+        source = source if source is None else to_language(source)
+        yield choose(profile, source, target, constraints)
         return
     # Every language a detector may report, and the fallback without a source.
     for candidate in (None, *Language):
         if candidate != target:
             with suppress(UnsupportedLanguageError):
-                yield choose(profile, candidate, target)
+                yield choose(profile, candidate, target, constraints)

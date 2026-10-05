@@ -138,6 +138,36 @@ Translator(Profile.BALANCE)  # Opus-MT where it exists, otherwise NLLB-200 at in
 
 On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 languages tested, and NLLB-200 adds up to 19 chrF++ on low-resource pairs such as English to Tamil. See [the profiles benchmark](docs/benchmarks.md#profiles) for the numbers behind each choice. The models behind a profile may change between releases, so pass a model explicitly when you need reproducible output.
 
+All three translation profiles use the same Opus-MT model for the 66 pairs it covers, and SMaLL-100 for texts without a source language. They only differ on the other pairs; see [routing](docs/benchmarks.md#routing).
+
+### Check before you download
+
+Ask what a profile would load, what it costs and whether it's allowed, without downloading anything:
+
+```python
+import noentenc
+from noentenc.translation import Translator
+
+plan = noentenc.plan("balance", translation=[("ja", "ca"), ("en", "es")])
+for model in plan.models:
+    print(model.name, model.license, model.download_bytes >> 20, "MB", model.cached)
+# On a machine that hasn't downloaded anything yet:
+# FastTextModel(openlid-v3) GPL-3.0 1175 MB False
+# NLLBModel(Xenova/nllb-200-distilled-600M) CC-BY-NC-4.0 869 MB False
+# OpusMTModel(Xenova/opus-mt-en-es) Apache-2.0 290 MB False
+
+# Only pick permissively licensed models, and nothing over 700 MB.
+translator = Translator(
+    "balance",
+    allowed_licenses=["MIT", "Apache-2.0", "CC-BY-4.0"],
+    max_download_bytes=700 << 20,
+)
+translator.plan("ca", "ja").models[0].name  # 'SMaLL100Model(casawolice/small100-onnx)'
+translator.supports("ace", "en")  # False: only NLLB-200 writes Acehnese
+```
+
+Each plan reports the model's licence, download size, RAM (measured, or estimated where marked) and cache state. A pair with no allowed model raises `ModelConstraintError` before anything downloads. `prepare()` takes the same constraints.
+
 ## Examples
 
 | Example | Shows how to |
@@ -150,6 +180,7 @@ On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 
 | [prepare_offline.py](docs/examples/prepare_offline.py) | Download a profile's weights into one directory, then detect and translate without network access. |
 | [translate_long_text.py](docs/examples/translate_long_text.py) | Translate emails and documents, and choose between an error and `truncate=True` for over-long sentences. |
 | [manage_memory.py](docs/examples/manage_memory.py) | Bound how many translation models stay loaded, and free them with `unload()`. |
+| [plan_and_limit.py](docs/examples/plan_and_limit.py) | See what a profile would download and what it costs, and restrict it by licence and download size. |
 | [translate_bulk.py](docs/examples/translate_bulk.py) | Run bulk jobs with `errors="record"` so one bad row doesn't stop them, and skip model loads for empty, blank and same-language input. |
 | [choose_profile.py](docs/examples/choose_profile.py) | Trade latency for quality with the `speed`, `balance` and `quality` profiles. |
 | [custom_models.py](docs/examples/custom_models.py) | Plug your own detector and translator into the same API. |

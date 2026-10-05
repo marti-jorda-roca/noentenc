@@ -71,9 +71,9 @@ def test_detector_offline_miss_fails_at_once(tmp_path: Path) -> None:
 
 
 def test_offline_options_are_for_profiles_only() -> None:
-    with pytest.raises(ValueError, match="pass them to your model"):
+    with pytest.raises(ValueError, match="a profile loads"):
         LanguageDetector(FastTextModel(TINY), only_local_files=True)
-    with pytest.raises(ValueError, match="pass them to your model"):
+    with pytest.raises(ValueError, match="a profile loads"):
         Translator(UpperModel(), cache_dir="/models")
 
 

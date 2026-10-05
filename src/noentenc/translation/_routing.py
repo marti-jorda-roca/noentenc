@@ -6,6 +6,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from noentenc._cache import translation_cache
+from noentenc._catalog import OPUS_MT_LICENSES, TRANSLATION_FILE_SIZES
+from noentenc._plan import (
+    Constraints,
+    ModelConstraintError,
+    ModelPlan,
+    hf_cached,
+    translation_memory,
+)
 from noentenc.languages import Language, UnsupportedLanguageError
 from noentenc.profiles import Profile
 from noentenc.translation.models._seq2seq import Precision, Seq2SeqModel
@@ -26,6 +35,41 @@ class ModelChoice:
     revision: str
     # None is the class's default precision.
     precision: Precision | None = None
+
+    @property
+    def name(self) -> str:
+        """The model as `Translation.model` names it."""
+        return f"{self.model_class.__name__}({self.repo})"
+
+    def plan(
+        self, cache_dir: str | Path | None = None, *, check_cache: bool = True
+    ) -> ModelPlan:
+        """What loading this model costs, from the catalog; downloads nothing.
+
+        Without `check_cache`, `cached` is False instead of looking at the cache.
+        """
+        precision = self.model_class._check_precision(self.precision)
+        files = self.model_class.filenames(precision)
+        sizes = TRANSLATION_FILE_SIZES[f"{self.repo}@{self.revision}"]
+        download = sum(sizes[name] for name in files)
+        memory, basis = translation_memory(
+            self.model_class.__name__, str(precision), download
+        )
+        licence = OPUS_MT_LICENSES.get(self.repo) or self.model_class.weights_license
+        return ModelPlan(
+            task="translation",
+            name=self.name,
+            precision=str(precision),
+            license=licence or "unknown",
+            download_bytes=download,
+            memory_bytes=memory,
+            memory_basis=basis,
+            cached=check_cache
+            and hf_cached(
+                self.repo, self.revision, files, translation_cache(cache_dir)
+            ),
+            files=tuple(files),
+        )
 
     def build(
         self, *, only_local_files: bool = False, cache_dir: str | Path | None = None
@@ -60,6 +104,17 @@ def _opus_mt(source: Language | None, target: Language) -> ModelChoice | None:
     return ModelChoice(OpusMTModel, *pair_repo(source, target))
 
 
+def _opus_mt_int8(source: Language | None, target: Language) -> ModelChoice | None:
+    # Only reached when constraints reject the default q4 export: int8 scores the same
+    # on FLORES-200 and downloads 2.7x less, but is slower one sentence at a time.
+    choice = _opus_mt(source, target)
+    return (
+        None
+        if choice is None
+        else ModelChoice(OpusMTModel, choice.repo, choice.revision, Precision.INT8)
+    )
+
+
 def _small100(source: Language | None, target: Language) -> ModelChoice | None:
     return _multilingual(SMaLL100Model, source, target)
 
@@ -88,19 +143,39 @@ def _multilingual(
 # Where Opus-MT has a model it scores as well as NLLB-200 on average and is ~8x faster
 # (FLORES-200 chrF++, docs/benchmarks.md), so every profile tries it first.
 CANDIDATES: dict[Profile, tuple[_Candidate, ...]] = {
-    Profile.SPEED: (_opus_mt, _small100),
-    Profile.BALANCE: (_opus_mt, _nllb_int8, _small100),
-    Profile.QUALITY: (_opus_mt, _nllb_fp32, _small100),
+    Profile.SPEED: (_opus_mt, _opus_mt_int8, _small100),
+    Profile.BALANCE: (_opus_mt, _opus_mt_int8, _nllb_int8, _small100),
+    Profile.QUALITY: (_opus_mt, _opus_mt_int8, _nllb_fp32, _small100),
 }
 
 
-def choose(profile: Profile, source: Language | None, target: Language) -> ModelChoice:
-    """The model `profile` uses for `source` -> `target` (`source=None`: unknown)."""
+def choose(
+    profile: Profile,
+    source: Language | None,
+    target: Language,
+    constraints: Constraints | None = None,
+) -> ModelChoice:
+    """The model `profile` uses for `source` -> `target` (`source=None`: unknown).
+
+    A candidate that `constraints` rejects is skipped for the next one; when every
+    candidate is rejected, `ModelConstraintError` says why.
+    """
+    rejected: list[str] = []
     for candidate in CANDIDATES[profile]:
         choice = candidate(source, target)
-        if choice is not None:
+        if choice is None:
+            continue
+        reason = None
+        if constraints is not None and constraints.active:
+            reason = constraints.rejection(choice.plan(check_cache=False))
+        if reason is None:
             return choice
+        rejected.append(f"{choice.name}: {reason}")
     pair = f"into {target}" if source is None else f"{source}->{target}"
+    if rejected:
+        raise ModelConstraintError(
+            f"No {profile} model for {pair} meets the constraints ({'; '.join(rejected)})"
+        )
     raise UnsupportedLanguageError(
         f"No {profile} model translates {pair}; pass a model explicitly"
     )

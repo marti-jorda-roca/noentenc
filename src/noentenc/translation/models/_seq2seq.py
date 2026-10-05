@@ -68,6 +68,8 @@ class Seq2SeqModel(BaseModel):
     # (encoder, decoder) ONNX filenames inside the model repo, per precision.
     onnx_files: ClassVar[dict[Precision, tuple[str, str]]] = XENOVA_ONNX_FILES
     extra_files: ClassVar[tuple[str, ...]] = ()
+    # SPDX licence of the default weights; None when it differs per model (Opus-MT).
+    weights_license: ClassVar[str | None] = None
 
     def __init__(
         self,

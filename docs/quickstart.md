@@ -223,6 +223,37 @@ Every translation profile uses the dedicated Opus-MT model when the pair has one
 
 Check the licences before you use `balance` or `quality` commercially. NLLB-200 is non-commercial (CC-BY-NC-4.0) and warns when it loads, and `openlid-v3` is GPL-3.0. [Benchmarks](benchmarks.md#profiles) has the accuracy and speed of each choice, and [choose_profile.py](examples/choose_profile.py) runs all three profiles.
 
+The three profiles often pick the same translation model. Opus-MT pairs use Opus-MT in every profile, and texts without a source language use SMaLL-100 in every profile. So `quality` only changes the output of other pairs. [Routing](benchmarks.md#routing) has the full table.
+
+### Plan, and set limits
+
+To see what a profile would download before it does, ask for a plan. It loads and downloads nothing.
+
+```python
+import noentenc
+
+plan = noentenc.plan("balance", translation=[("ja", "ca")])
+[(m.name, m.license, m.download_bytes >> 20, m.memory_bytes >> 20) for m in plan.models]
+# [('FastTextModel(openlid-v3)', 'GPL-3.0', 1175, 1142),
+#  ('NLLBModel(Xenova/nllb-200-distilled-600M)', 'CC-BY-NC-4.0', 869, 4057)]
+plan.missing_bytes  # what still has to download
+```
+
+`memory_bytes` is resident memory once loaded. `memory_basis` says whether that was measured (see [Memory](benchmarks.md#memory)) or estimated. `Translator(...).plan(target, source)` does the same for one pair, and `LanguageDetector(...).plan()` for a detector. `Translator.supports(target, source)` and `Translator.supported_languages()` say which pairs a profile covers.
+
+To keep a profile within your licence policy or download budget, pass `allowed_licenses` (SPDX identifiers) and `max_download_bytes`. A profile then skips a model that breaks them for its next choice. NLLB-200 gives way to SMaLL-100, and Opus-MT q4 gives way to the smaller Opus-MT int8. If nothing is left, the call raises `ModelConstraintError` before downloading.
+
+```python
+from noentenc.translation import Translator
+
+translator = Translator("quality", allowed_licenses=["MIT", "Apache-2.0", "CC-BY-4.0"])
+translator.translate(
+    "こんにちは", "ca", "ja"
+)  # SMaLL-100, not the non-commercial NLLB-200
+```
+
+`LanguageDetector`, `noentenc.plan` and `noentenc.prepare` take the same two arguments. With `source_language="auto"`, a text whose pair has no allowed model gets status `unsupported_source`.
+
 The models behind a profile may change between releases. If you need the same output every time, pass a model explicitly as shown below.
 
 ## Choose a detection model

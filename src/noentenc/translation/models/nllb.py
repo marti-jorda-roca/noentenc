@@ -223,6 +223,7 @@ class NLLBModel(Seq2SeqModel):
     default_revision: ClassVar[str] = "261c31d1a5732c67cdd16d80e8d6088507c7ccea"
     # The q4 export scores up to 7 chrF++ lower on FLORES-200 and is 2.6x larger.
     default_precision: ClassVar[Precision] = Precision.INT8
+    weights_license: ClassVar[str | None] = "CC-BY-NC-4.0"
 
     def __init__(
         self,

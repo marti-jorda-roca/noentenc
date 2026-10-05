@@ -1,16 +1,20 @@
-"""RAM taken by each translation model, and peak RAM of a multilingual `Translator` workload.
+"""RAM taken by each model, and peak RAM of a multilingual `Translator` workload.
 
 Every measurement runs in a fresh process, so models don't share memory between rows.
 
 - `models`: resident memory added by loading one model and translating a sentence with it.
+- `detection`: resident memory added by loading each detection model and labelling 2,000
+  sentences in 200 languages (FLORES-200 devtest, `--flores`). The large fastText models
+  are memory-mapped, so this counts the pages those sentences touched.
 - `workload`: a `Translator()` cycling twice through 8 Opus-MT pairs and one SMaLL-100
   pair, for several `max_loaded_models` limits: peak resident memory, final resident memory
   and wall time (which includes reloading evicted models).
 
 Uses the Hugging Face cache, downloading the models it lacks. Needs psutil:
 
-    uv run --with psutil python scripts/measure_translation_memory.py models
-    uv run --with psutil python scripts/measure_translation_memory.py workload
+    uv run --with psutil python scripts/measure_memory.py models
+    uv run --with psutil python scripts/measure_memory.py workload
+    uv run --with psutil python scripts/measure_memory.py detection --flores flores200_dataset
 """
 
 import argparse
@@ -109,6 +113,61 @@ def models(repeat: int) -> None:
         print(f"| {name} | {stats['rss'] / MB:.0f} MB | {stats['peak'] / MB:.0f} MB |")
 
 
+DETECTORS = {
+    "lid176": "FastTextModel('lid176')",
+    "langid": "LangidModel()",
+    "bert-openlid": "OnnxClassifierModel('bert-openlid')",
+    "openlid-v3": "FastTextModel('openlid-v3')",
+    "glotlid": "FastTextModel('glotlid')",
+}
+
+_DETECTION = """
+import json, resource, sys
+from pathlib import Path
+import psutil
+# Imported up front, so the libraries themselves aren't counted as model memory.
+import numpy, onnxruntime, tokenizers
+from noentenc.language_detection import FastTextModel, LangidModel, OnnxClassifierModel
+
+def peak():
+    usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return usage if sys.platform == "darwin" else usage * 1024
+
+texts = [
+    line
+    for path in sorted(Path({flores!r}, "devtest").glob("*.devtest"))
+    for line in path.read_text(encoding="utf-8").splitlines()[:10]
+]
+process = psutil.Process()
+before = process.memory_info().rss
+model = {build}
+model.predict_batch(texts)
+print(json.dumps({{"rss": process.memory_info().rss - before, "peak": peak() - before}}))
+"""
+
+
+def detection(repeat: int, flores: str) -> None:
+    print(f"Median of {repeat} runs.")
+    print("| Model | RAM after labelling 2,000 sentences | Peak |")
+    print("|---|---:|---:|")
+    for name, build in DETECTORS.items():
+        code = _DETECTION.format(build=build, flores=flores)
+        runs = [
+            json.loads(
+                subprocess.run(
+                    [sys.executable, "-c", code],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.strip()
+            )
+            for _ in range(repeat)
+        ]
+        rss = statistics.median(run["rss"] for run in runs)
+        peak = statistics.median(run["peak"] for run in runs)
+        print(f"| {name} | {rss / MB:.0f} MB | {peak / MB:.0f} MB |")
+
+
 def workload(repeat: int) -> None:
     print(
         f"{len(PAIRS)} pairs, cycled twice. One sentence per call, so the time is mostly loading."
@@ -127,10 +186,16 @@ def workload(repeat: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("what", choices=["models", "workload"])
+    parser.add_argument("what", choices=["models", "workload", "detection"])
     parser.add_argument("--repeat", type=int, default=3, help="runs per row (median)")
+    parser.add_argument("--flores", help="detection: extracted flores200_dataset")
     args = parser.parse_args()
-    {"models": models, "workload": workload}[args.what](args.repeat)
+    if args.what == "detection":
+        if not args.flores:
+            parser.error("detection needs --flores")
+        detection(args.repeat, args.flores)
+    else:
+        {"models": models, "workload": workload}[args.what](args.repeat)
 
 
 if __name__ == "__main__":
