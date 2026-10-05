@@ -1,6 +1,13 @@
+from __future__ import annotations
+
+import re
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Final
+from functools import cache
+from typing import Final, TypeVar, overload
+
+_T = TypeVar("_T")
+_PART1_LENGTH = 2
 
 
 class Language(StrEnum):
@@ -272,3 +279,104 @@ class LanguageSchema:
 
 def _accepts(side: frozenset[Language] | AnyLanguage, language: Language) -> bool:
     return isinstance(side, AnyLanguage) or language in side
+
+
+class _Raise:
+    """Default of `to_language`: raise on unknown codes."""
+
+
+_RAISE: Final = _Raise()
+
+
+@overload
+def to_language(value: Language | str) -> Language: ...
+
+
+@overload
+def to_language(value: Language | str, default: _T) -> Language | _T: ...
+
+
+def to_language(value: Language | str, default: object = _RAISE) -> object:
+    """The `Language` for a code or name, e.g. `"spa"`, `"es"`, `"es-ES"` or `"spanish"`.
+
+    Accepts ISO 639-1 and 639-3 codes (including deprecated and retired ones such as
+    `"iw"`), BCP-47 and FLORES-style tags (`"pt-BR"`, `"zho_Hans"`; only the language
+    part counts) and English names (`"Spanish"`, `"norwegian nynorsk"`). An individual
+    language that isn't a member maps to its macrolanguage when that is one: `"cmn"`
+    (Mandarin) is `CHINESE`, `"arb"` (Standard Arabic) `ARABIC` and `"nob"` (Bokmål)
+    `NORWEGIAN`. Members that are individual languages themselves stay distinct:
+    `"yue"` is `CANTONESE` and `"ary"` `MOROCCAN_ARABIC`.
+
+    An unknown value, `"und"` (undetermined) and `"zxx"` (no linguistic content) raise
+    `UnsupportedLanguageError`, or return `default` when one is given.
+    """
+    if isinstance(value, Language):
+        return value
+    if not isinstance(value, str):
+        raise TypeError(f"expected a language code or name, got {type(value).__name__}")
+    language = _lookup(value.strip())
+    if language is not None:
+        return language
+    if default is not _RAISE:
+        return default
+    raise UnsupportedLanguageError(
+        f"{value!r} is not a language noentenc knows; pass an ISO 639 code such as "
+        "'es' or 'spa', or a Language member"
+    )
+
+
+def _lookup(value: str) -> Language | None:
+    by_name = Language.__members__.get(re.sub(r"[\s-]+", "_", value).upper())
+    if by_name is not None:
+        return by_name
+    code = re.split(r"[-_]", value.lower(), maxsplit=1)[0]
+    by_value = _by_value().get(code)
+    if by_value is not None:
+        return by_value
+    tables = _iso639_tables()
+    part3 = tables.part1_to_part3.get(code) if len(code) == _PART1_LENGTH else code
+    if part3 is None:
+        return None
+    part3 = tables.retired.get(part3, part3)
+    found = _by_part3().get(part3)
+    if found is None and part3 in tables.macro:
+        found = _by_part3().get(tables.macro[part3])
+    return found
+
+
+@dataclass(frozen=True)
+class _Iso639Tables:
+    part1_to_part3: dict[str, str]
+    retired: dict[str, str]
+    macro: dict[str, str]
+
+
+@cache
+def _iso639_tables() -> _Iso639Tables:
+    from noentenc.language_detection._iso639 import (
+        INDIVIDUAL_TO_MACRO,
+        PART1_TO_PART3,
+        RETIRED_TO_CURRENT,
+    )
+    from noentenc.language_detection.labels import LABEL_OVERRIDES
+
+    # Deprecated ISO 639-1 codes ("iw", "in", "ji"...) as well as the current ones.
+    part1 = {
+        **PART1_TO_PART3,
+        **{c: p3 for c, p3 in LABEL_OVERRIDES.items() if len(c) == _PART1_LENGTH},
+    }
+    return _Iso639Tables(part1, RETIRED_TO_CURRENT, INDIVIDUAL_TO_MACRO)
+
+
+@cache
+def _by_value() -> dict[str, Language]:
+    return {language.value: language for language in Language}
+
+
+@cache
+def _by_part3() -> dict[str, Language]:
+    """Each member by its ISO 639-3 code."""
+    part1 = _iso639_tables().part1_to_part3
+    return {
+        part1.get(language.value, language.value): language for language in Language
+    }

@@ -3,8 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every pull request, including those stacked on another branch.
   pull_request:
-    branches: [main]
   workflow_call:
 
 permissions:
@@ -55,9 +55,17 @@ jobs:
       - run: uv run --no-sync ty check --output-format=github
 
   unit-tests:
-    name: Unit tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: Unit tests / ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every Python version and OS that pyproject.toml declares.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    env:
+      UV_PYTHON: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,10 +76,63 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           prune-cache: true
-      - run: uv python install
+      - run: uv python install ${{ matrix.python }}
       - run: uv sync --locked --all-extras --group dev
       - run: uv run --no-sync coverage run -m pytest tests/unit --strict-config --strict-markers -v --tb=short
       - run: uv run --no-sync coverage report
+
+  # The "Protect main" ruleset requires a check named exactly "Unit tests"; matrix jobs
+  # report as "Unit tests / <os> / Python <version>", so this job stands in for all of them.
+  unit-tests-gate:
+    name: Unit tests
+    if: always()
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every unit-test job passed
+        env:
+          RESULT: ${{ needs.unit-tests.result }}
+        run: |
+          echo "unit-tests matrix: $RESULT"
+          test "$RESULT" = "success"
+
+  install-smoke:
+    name: Wheel quickstart / ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.22"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: true
+      - run: uv python install ${{ matrix.python }}
+      - run: uv build --wheel --no-sources
+      - name: Detection quickstart, core install only
+        run: uv run --no-project --isolated --with dist/*.whl python scripts/smoke_quickstart.py detection
+        env:
+          NOENTENC_CACHE: ${{ runner.temp }}/noentenc
+      - name: Translation quickstart, translation extra
+        run: |
+          wheel=$(ls dist/*.whl)
+          uv run --no-project --isolated --with "noentenc[translation] @ $wheel" python scripts/smoke_quickstart.py translation
+        env:
+          HF_HOME: ${{ runner.temp }}/huggingface
 
   integration-tests:
     name: Integration tests / ${{ matrix.suite }}
@@ -98,7 +159,7 @@ jobs:
           cache-dependency-glob: uv.lock
           prune-cache: true
       - run: uv python install
-      - run: uv sync --locked --group dev
+      - run: uv sync --locked --extra translation --extra onnx --group dev
       - run: uv run --no-sync pytest tests/integrations/${{ matrix.suite }} --strict-config --strict-markers -v --tb=short
         env:
           NOENTENC_CACHE: ${{ runner.temp }}/noentenc

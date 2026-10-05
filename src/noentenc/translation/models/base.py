@@ -12,11 +12,16 @@ class InputTooLongError(ValueError):
 
 class TranslationStatus(StrEnum):
     TRANSLATED = "translated"
-    # Returned as given without calling a model: blank, or already in the target
-    # language.
+    # Returned as given without calling a model: blank, already in the target language,
+    # or (with `source_language="auto"`) without linguistic content, such as a bare link.
     UNCHANGED = "unchanged"
     # The model raised, and `errors="record"` kept the original text.
     FAILED = "failed"
+    # `source_language="auto"` couldn't tell the language, so the text was kept as given.
+    UNKNOWN_SOURCE = "unknown_source"
+    # `source_language="auto"` detected a language that no model translates into the
+    # target, so the text was kept as given.
+    UNSUPPORTED_SOURCE = "unsupported_source"
 
 
 @dataclass(frozen=True)
@@ -33,6 +38,19 @@ class Translation:
     status: TranslationStatus = TranslationStatus.TRANSLATED
     # Why the translation failed, as "ErrorType: message", when `status` is FAILED.
     error: str | None = None
+    # The source language used: the one passed, or the detected one.
+    source_language: Language | None = None
+    # With `source_language="auto"`: the detector's label (ISO 639-3, "und" when it
+    # abstained, "zxx" for no linguistic content) and the score of its top label.
+    detected_language: str | None = None
+    detection_score: float | None = None
+    # The model that translated the text, e.g. "OpusMTModel(Xenova/opus-mt-de-en)".
+    model: str | None = None
+    # How URLs, emails, code, placeholders, tags and numbers were kept unchanged:
+    # "placeholders" (swapped out and back), "segments" (the prose between them was
+    # translated piece by piece, because placeholders didn't survive), or None when the
+    # text had none or `preserve=False`.
+    preservation: str | None = None
 
 
 class BaseModel(ABC):

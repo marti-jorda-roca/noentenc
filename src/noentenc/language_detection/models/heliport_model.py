@@ -1,6 +1,6 @@
 """heliport backend: a Rust port of HeLI-OTS (220 languages). GPL-3.0; no Windows wheels."""
 
-from noentenc.language_detection._optional import require
+from noentenc._optional import require
 from noentenc.language_detection.labels import (
     NO_LINGUISTIC_CONTENT,
     UNDETERMINED,
@@ -29,6 +29,8 @@ class HeliportModel(BaseModel):
     only the top language with its confidence (higher is more confident; not bounded by 1).
     Batches run in parallel in Rust.
     """
+
+    scores_every_label = False
 
     def __init__(
         self,

@@ -27,8 +27,9 @@ def test_matches_langid(name: str) -> None:
     languages = RESTRICTED if name == "langid-restricted" else None
     model = LangidModel(normalize_labels=False, languages=languages)
     sentences = load_sentences()
-    got = model.predict_batch_score(sentences, top_k=None)
-    top1 = model.predict_batch(sentences)
+    # The engine itself: the base class labels emoji-only and digit-only texts `zxx` by rule.
+    got = model._predict_score_chunk(sentences, None)
+    top1 = model._predict_chunk(sentences)
     for sentence, scores, best, ref in zip(
         sentences, got, top1, EXPECTED[name], strict=True
     ):

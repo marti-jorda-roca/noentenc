@@ -1,4 +1,7 @@
-"""Transformer sequence classifiers for language identification, run with onnxruntime."""
+"""Transformer sequence classifiers for language identification, run with onnxruntime.
+
+onnxruntime and tokenizers come with the ``onnx`` extra and are imported when a model is built.
+"""
 
 import json
 from dataclasses import dataclass
@@ -6,9 +9,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
-from tokenizers import Tokenizer
 
 from noentenc._onnx import create_session, pad
+from noentenc._optional import ONNX_EXTRA, require
 from noentenc.language_detection._download import RemoteFile, fetch
 from noentenc.language_detection.models.base import BaseModel
 
@@ -79,11 +82,18 @@ class OnnxClassifierModel(BaseModel):
         collapse_macrolanguages: bool = False,
         max_length: int | None = None,
         num_threads: int | None = None,
+        *,
+        cache_dir: str | Path | None = None,
     ) -> None:
         super().__init__(
             model, only_local_files, normalize_labels, collapse_macrolanguages
         )
-        onnx_path, tokenizer_path, config_path = self._resolve(model, only_local_files)
+        # Checked before downloading weights that couldn't be run.
+        tokenizers = require("tokenizers", ONNX_EXTRA)
+        require("onnxruntime", ONNX_EXTRA)
+        onnx_path, tokenizer_path, config_path = self._resolve(
+            model, only_local_files, cache_dir
+        )
         if max_length is None:
             preset = PRESETS.get(model) if isinstance(model, str) else None
             max_length = preset.max_length if preset else DEFAULT_MAX_LENGTH
@@ -94,7 +104,7 @@ class OnnxClassifierModel(BaseModel):
         self._mapper = self._label_mapper(self.native_labels)
         self._pad_id = int(config.get("pad_token_id") or 0)
 
-        self._tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        self._tokenizer = tokenizers.Tokenizer.from_file(str(tokenizer_path))
         self._tokenizer.no_padding()
         self._tokenizer.enable_truncation(max_length=max_length)
         self._max_chars = max_length * MAX_CHARS_PER_TOKEN
@@ -102,19 +112,29 @@ class OnnxClassifierModel(BaseModel):
         self._input_names = {inp.name for inp in self._session.get_inputs()}
 
     @staticmethod
-    def _resolve(model: str | Path, only_local_files: bool) -> tuple[Path, Path, Path]:
-        if isinstance(model, str) and model in PRESETS:
-            preset = PRESETS[model]
-            return (
-                fetch(
-                    preset.remote(preset.onnx_file, preset.onnx_sha256),
-                    only_local_files=only_local_files,
-                ),
-                fetch(
-                    preset.remote("tokenizer.json"), only_local_files=only_local_files
-                ),
-                fetch(preset.remote("config.json"), only_local_files=only_local_files),
+    def remote_files(preset: str) -> list[RemoteFile]:
+        """The files a preset downloads: the ONNX graph, tokenizer and config."""
+        if preset not in PRESETS:
+            raise ValueError(
+                f"unknown ONNX preset {preset!r}; presets: {', '.join(PRESETS)}"
             )
+        spec = PRESETS[preset]
+        return [
+            spec.remote(spec.onnx_file, spec.onnx_sha256),
+            spec.remote("tokenizer.json"),
+            spec.remote("config.json"),
+        ]
+
+    @staticmethod
+    def _resolve(
+        model: str | Path, only_local_files: bool, cache_dir: str | Path | None
+    ) -> tuple[Path, Path, Path]:
+        if isinstance(model, str) and model in PRESETS:
+            onnx, tokenizer, config = (
+                fetch(remote, only_local_files=only_local_files, cache_dir=cache_dir)
+                for remote in OnnxClassifierModel.remote_files(model)
+            )
+            return onnx, tokenizer, config
         root = Path(model)
         if not root.is_dir():
             raise FileNotFoundError(

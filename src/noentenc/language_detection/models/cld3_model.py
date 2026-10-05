@@ -1,6 +1,6 @@
 """Google CLD3 backend: a tiny feed-forward network over character n-grams (107 languages)."""
 
-from noentenc.language_detection._optional import require
+from noentenc._optional import require
 from noentenc.language_detection.labels import UNDETERMINED
 from noentenc.language_detection.models.base import BaseModel
 
@@ -21,6 +21,8 @@ class Cld3Model(BaseModel):
     single-language spans and reports each span language's own probability, so the values are
     not a distribution over all languages and don't sum to 1.
     """
+
+    scores_every_label = False
 
     def __init__(
         self,

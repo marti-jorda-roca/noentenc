@@ -66,7 +66,7 @@ def make_engine(
     decoder = FakeDecoder(scripts)
     sessions = {"encoder": FakeEncoder(), "decoder": decoder}
     monkeypatch.setattr(
-        _engine, "create_session", lambda path, num_threads: sessions[path.name]
+        _engine, "create_session", lambda path, num_threads, extra: sessions[path.name]
     )
     return Seq2SeqOnnxEngine(Path("encoder"), Path("decoder"), SHAPE), decoder
 

@@ -223,6 +223,7 @@ class NLLBModel(Seq2SeqModel):
     default_revision: ClassVar[str] = "261c31d1a5732c67cdd16d80e8d6088507c7ccea"
     # The q4 export scores up to 7 chrF++ lower on FLORES-200 and is 2.6x larger.
     default_precision: ClassVar[Precision] = Precision.INT8
+    weights_license: ClassVar[str | None] = "CC-BY-NC-4.0"
 
     def __init__(
         self,
@@ -232,6 +233,7 @@ class NLLBModel(Seq2SeqModel):
         revision: str | None = None,
         precision: Precision | str | None = None,
         num_threads: int | None = None,
+        cache_dir: str | Path | None = None,
     ) -> None:
         warnings.warn(
             "NLLB-200 is licensed CC-BY-NC-4.0: non-commercial use only.",
@@ -244,6 +246,7 @@ class NLLBModel(Seq2SeqModel):
             revision=revision,
             precision=precision,
             num_threads=num_threads,
+            cache_dir=cache_dir,
         )
 
     def _language_id(self, language: Language) -> int:

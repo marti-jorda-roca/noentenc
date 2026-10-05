@@ -21,7 +21,13 @@ def test_profiles_pick_fasttext_presets(monkeypatch: pytest.MonkeyPatch) -> None
     created: list[str] = []
 
     class FakeFastText(FastTextModel):
-        def __init__(self, model: str = "lid176") -> None:
+        def __init__(
+            self,
+            model: str = "lid176",
+            only_local_files: bool = False,
+            *,
+            cache_dir: object = None,
+        ) -> None:
             created.append(model)
             super().__init__(TINY)
 

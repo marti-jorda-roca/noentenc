@@ -103,15 +103,19 @@ class LangidModel(BaseModel):
         normalize_labels: bool = True,
         collapse_macrolanguages: bool = False,
         languages: Iterable[str] | None = None,
+        *,
+        cache_dir: str | Path | None = None,
     ) -> None:
         super().__init__(
             model, only_local_files, normalize_labels, collapse_macrolanguages
         )
-        if model != "langid":
-            raise ValueError(
-                f"unknown langid model {model!r}; the only one is 'langid'"
+        weights = load_weights(
+            fetch(
+                self.remote_files(model)[0],
+                only_local_files=only_local_files,
+                cache_dir=cache_dir,
             )
-        weights = load_weights(fetch(LANGID_SDIST, only_local_files=only_local_files))
+        )
         keep = _candidates(weights.labels, languages)
         self._next_state = np.asarray(weights.next_state, dtype=np.uint16)
         self._n_states = weights.n_states
@@ -136,6 +140,15 @@ class LangidModel(BaseModel):
         ].ravel()
         self._class_log_prior = weights.class_log_prior[keep]
         self._mapper = self._label_mapper([weights.labels[i] for i in keep])
+
+    @staticmethod
+    def remote_files(model: str = "langid") -> list[RemoteFile]:
+        """The file the model downloads: the langid sdist."""
+        if model != "langid":
+            raise ValueError(
+                f"unknown langid model {model!r}; the only one is 'langid'"
+            )
+        return [LANGID_SDIST]
 
     def _states(self, texts: list[str]) -> tuple[np.ndarray, np.ndarray]:
         """``(states, owner)``: the DFA state entered after each UTF-8 byte of every text.

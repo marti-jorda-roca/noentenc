@@ -46,7 +46,7 @@ Subclass `noentenc.language_detection.BaseModel` and implement:
 | `_predict_chunk(texts)` | The top label for each text. |
 | `_predict_score_chunk(texts, top_k)` | One `{label: score}` dict per text, sorted by descending score, with at most `top_k` entries (`None` means all). |
 
-The base class handles the rest: `predict`, `predict_score`, the batched variants, splitting input into `batch_size` chunks and returning results in input order. Empty and whitespace-only texts get `"und"` without reaching your model, so the chunk methods only ever see real text.
+The base class handles the rest: `predict`, `predict_score`, the batched variants, splitting input into `batch_size` chunks and returning results in input order. Empty and whitespace-only texts get `"und"`, and texts without letters outside URLs and email addresses get `"zxx"`, without reaching your model, so the chunk methods only ever see real text. If your `predict_score` does not score every label (it reports only the top spans or label), set `scores_every_label = False` so `LanguageDetector(candidates=...)` refuses it.
 
 ```python
 from noentenc.language_detection import BaseModel, LanguageDetector
@@ -88,7 +88,7 @@ Rules every backend follows:
 - **Return ISO 639-3 labels by default.** `to_iso639_3` and `normalize_scores` convert ISO 639-1, FLORES (`eng_Latn`), BCP-47 (`zh-Latn`) and fastText labels. They also honour `collapse_macrolanguages`.
 - **Higher scores mean more likely.** Say in the docstring whether the scores are probabilities.
 - **Set `sort_batches_by_length = True` if the model pads each batch to its longest text**, as transformers do. The base class then groups texts of similar length and still returns results in input order.
-- **Import optional dependencies lazily** with `noentenc.language_detection._optional.require("module", "extra")`, so users without the extra get an install hint instead of an `ImportError` at import time.
+- **Import optional dependencies lazily** with `noentenc._optional.require("module", "extra")`, so users without the extra get an install hint instead of an `ImportError` at import time.
 
 ## 3. A new translation model
 
@@ -134,6 +134,7 @@ translator = Translator(MyServiceModel(client))
 - **Call `self.schema.validate(...)` first in `predict_batch`.** It raises `UnsupportedLanguageError` for a language the model can't handle, so nothing gets silently mistranslated. `Translator` also checks it before calling you, but direct calls to your model don't go through `Translator`.
 - **Languages are always `Language` enum members, never free strings.** `str(Language.SPANISH)` is `"es"` (ISO 639-1, or 639-3 when there's no 639-1 code). Map it to whatever codes your service expects.
 - **Return translations in input order, one per text.** `Translator` never passes you an empty batch, blank texts, a same-language request or (in `translate_dataset`) null cells.
+- **Expect placeholders such as `ZXQ0` in your input.** `Translator` swaps URLs, emails, code, template placeholders, tags and numbers for them, and puts the originals back in your output. Copy them through unchanged. If your output loses, repeats or alters one, `Translator` calls you again with the prose between those literals, one piece per text, so the literals still survive. If your service protects such text itself, or you need it to see the original text, call the translator with `preserve=False`.
 - **Optionally override `predict_batch_detailed`** to report dropped input or cut-short output in a `Translation`, and to honour `truncate`. The default wraps `predict_batch` and reports nothing missing. `Translator` passes your model whole texts; split them yourself if your model only handles short input.
 
 ## 4. A new ONNX encoder-decoder translation model

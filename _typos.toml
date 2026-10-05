@@ -4,6 +4,8 @@ extend-exclude = [
   "src/noentenc/language_detection/_iso639.py",
   # Model label dumps and multilingual sample sentences
   "tests/unit/language_detection/fixtures/",
+  # Hand-labelled multilingual detection cases, misspellings included on purpose
+  "scripts/data/",
 ]
 
 [default]
@@ -22,3 +24,5 @@ ba = "ba"
 fo = "fo"
 als = "als"
 tha = "tha"
+# German, in translation examples
+Sie = "Sie"

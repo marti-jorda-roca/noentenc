@@ -16,6 +16,7 @@ class SMaLL100Model(M2M100Model):
     default_model: ClassVar[str] = "casawolice/small100-onnx"
     default_revision: ClassVar[str] = "5c2c73ac70bee9c58f5a7ac5e84a36bee25db8ee"
     default_precision: ClassVar[Precision] = Precision.INT8
+    weights_license: ClassVar[str | None] = "MIT"
     # This export only ships int8 weights, under the unsuffixed file names.
     onnx_files: ClassVar[dict[Precision, tuple[str, str]]] = {
         Precision.INT8: ("onnx/encoder_model.onnx", "onnx/decoder_model_merged.onnx"),

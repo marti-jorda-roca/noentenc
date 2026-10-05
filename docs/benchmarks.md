@@ -49,6 +49,55 @@ Both return the same labels and scores as the reference `fasttext` and `langid` 
 - **For short texts in a known set of languages, use `LinguaModel(languages=[...])`.** It's slower, but restricting the candidates helps where n-gram models struggle.
 - **`heliport` is the fastest**, but it's GPL-3.0 and has no Windows wheel.
 
+### Detection memory
+
+Resident memory added by loading each model and labelling 2,000 FLORES-200 sentences, 10 in each of 200 languages, in a fresh process with numpy, onnxruntime and tokenizers already imported (median of 3 runs):
+
+| Model | RAM | Download |
+|---|---:|---:|
+| `lid176` | 22 MB | 0.9 MB |
+| `langid` | 112 MB | 1.9 MB |
+| `bert-openlid` | 249 MB | 25 MB |
+| `openlid-v3` | 1.14 GB | 1.2 GB |
+| `glotlid` | 1.27 GB | 1.7 GB |
+
+The large fastText models are memory-mapped, so they load in milliseconds and their resident memory is the pages the texts touched. Here that's most of the file. The operating system can drop those pages under memory pressure and read them back from disk. Reproduce with `uv run --with psutil python scripts/measure_memory.py detection --flores flores200_dataset`.
+
+## Conservative detection
+
+`LanguageDetector(min_letters=..., min_score=..., min_margin=...)` returns `und` instead of a guess when a text misses a threshold. These rates come from `scripts/evaluate_detection.py`, run on the 126 hand-labelled cases in `scripts/data/detection_cases.tsv`:
+
+- 92 texts with a language: 40 short support messages in 15 languages, 17 messages with typos, 19 sentences in closely related languages (Catalan/Spanish, Galician/Portuguese, Danish/Norwegian/Swedish, Czech/Slovak, Croatian/Serbian, Indonesian/Malay, Ukrainian/Russian, Afrikaans/Dutch), 8 mixed-language messages where either language counts, and 8 paragraphs.
+- 20 texts a conservative router should skip: 10 people's names and 10 chat tokens such as `lol`, `ok` and `xD`.
+- 14 nonlinguistic texts: numbers, emoji, punctuation, URLs and email addresses.
+
+**Right**, **Wrong** and **Abstained** are shares of the 92 texts with a language. **Skipped** is the share of the 20 names and chat tokens that got `und` or `zxx`. Labels are compared with macrolanguages collapsed. All 14 nonlinguistic texts get `zxx` under every setting, without running the model; before this rule they all got a language label.
+
+| Backend | Setting | Right | Wrong | Abstained | Skipped |
+|---|---|---:|---:|---:|---:|
+| `lid176` | default | 97% | 3% | 0% | 0% |
+| | `min_letters=4, min_score=0.5` (tested) | 92% | 2% | 5% | 90% |
+| | `min_score=0.7` | 84% | 1% | 15% | 100% |
+| `langid` | default | 92% | 8% | 0% | 0% |
+| | `min_letters=4, min_score=0.7` (tested) | 89% | 4% | 7% | 85% |
+| `bert-openlid` | default | 91% | 9% | 0% | 0% |
+| | `min_score=0.7` (tested) | 82% | 2% | 16% | 95% |
+| `lingua` | default | 92% | 8% | 0% | 0% |
+| | `min_margin=0.1` (tested) | 85% | 1% | 14% | 70% |
+| | `min_score=0.5` | 66% | 1% | 33% | 90% |
+| `cld3` | default | 87% | 13% | 0% | 0% |
+| | `min_letters=4, min_score=0.7` (tested) | 80% | 4% | 15% | 65% |
+| `heliport` | default | 98% | 2% | 0% | 35% |
+| | `min_letters=4, min_score=0.3` (tested) | 93% | 0% | 7% | 85% |
+
+- **`min_letters=4` alone skips most chat tokens** (`lol`, `ok`, `xD`) at no cost to real messages, and it saves the model call. It doesn't catch names.
+- **A score threshold catches names**, which score low on most backends. The tested setting cuts wrong labels by a third on `lid176` and by half or more on the others, and skips 85 to 95% of names and chat tokens. CLD3 is the exception: it's confident about too many names.
+- **lingua's scores are relative**, so it abstains much more at the same `min_score` than the other backends. A small `min_margin` suits it better.
+- **heliport's confidences run from 0 to about 2.5**, not 0 to 1, so its thresholds are lower.
+- `openlid-v3` and `glotlid` weren't evaluated here. Their softmax scores behave like `bert-openlid`'s, but evaluate them with `--backends openlid-v3 glotlid` before you pick a threshold.
+
+The cases are few and hand-picked, so treat the rates as a guide to the trade-off, not as accuracy figures. To evaluate on your own messages, add rows to the TSV and rerun the script; `--by-category` breaks the rates down.
+
 ## Against the original implementations
 
 How many times faster noentenc is than each model's usual package, on the same texts and laptop (below 1× means the original is faster):
@@ -116,6 +165,46 @@ Download sizes are the ONNX encoder and decoder that each precision loads.
 
 The Xenova q4 exports keep some weights in fp32, so for Opus-MT and M2M100 q4 is larger than int8. On batches it's also slower. For M2M100 and NLLB-200, q4 also translates much worse (see [Profiles](#translation-1)), so int8 is their default. Benchmark your own workload before you pick a precision.
 
+### Memory
+
+A loaded model takes much more RAM than its download: onnxruntime keeps the parsed graph, optimised copies of the weights and its working buffers. Resident memory added by loading each model and translating one sentence, in a fresh process with onnxruntime and tokenizers already imported (median of 3 runs):
+
+| Model | Precision | RAM | Download |
+|---|---|---:|---:|
+| Opus-MT en→es | int8 | 630 MB | 107 MB |
+| | q4 (default) | 1.08 GB | 287 MB |
+| | fp32 | 1.31 GB | 425 MB |
+| SMaLL-100 | int8 | 1.15 GB | 595 MB |
+| M2M100 418M | int8 | 2.38 GB | 603 MB |
+| NLLB-200 600M | int8 | 4.06 GB | 860 MB |
+| | fp32 | 3.81 GB (5.8 GB peak while loading) | 3.5 GB |
+
+`Translator` keeps at most `max_loaded_models` models loaded, two by default, and drops the least recently used one before it loads another. Peak resident memory of a `Translator()` that translates one sentence for each of 9 pairs, twice round (8 Opus-MT pairs at q4, plus Catalan→English on SMaLL-100):
+
+| `max_loaded_models` | Peak RAM | Models loaded at the end | Time |
+|---:|---:|---:|---:|
+| 1 | 1.6 GB | 1 | 8.2 s |
+| 2 (default) | 2.4 GB | 2 | 8.3 s |
+| 4 | 3.9 GB | 4 | 9.1 s |
+| `None` (no limit) | 5.0 GB | 9 | 6.2 s |
+
+With one sentence per call, the time is almost all loading: a limit reloads the 9 models on the second round, about 0.2 s each. Keep the limit low when memory is tight, and raise it when calls keep alternating between more pairs than it allows. `translator.unload()` drops every loaded model.
+
+These are macOS figures. macOS compresses memory that isn't being used, which lowers resident memory for idle models, so expect higher numbers without a limit on Linux. To reproduce, run `uv run --with psutil python scripts/measure_memory.py models` and `... workload`.
+
+### Literal text
+
+`scripts/evaluate_literals.py` translates 26 support-style messages full of URLs, emails, code, placeholders, tags and numbers (16 English ones into Spanish and German, 6 Spanish and 4 German ones into English), with and without `preserve`. **Kept** is the share of texts whose literals all came back byte-for-byte. **Placeholders** and **Pieces** say how often preservation took each path.
+
+| Model | Texts | Kept, `preserve=False` | Kept | Placeholders | Pieces |
+|---|---:|---:|---:|---:|---:|
+| Opus-MT | 42 | 50% | **100%** | 98% | 2% |
+| SMaLL-100 | 42 | 50% | **100%** | 93% | 7% |
+| NLLB-200 600M int8 | 42 | 38% | **100%** | 93% | 7% |
+| M2M100 418M int8 | 42 | 48% | **100%** | 95% | 5% |
+
+Without preservation, half the messages lose a literal. The models translate URL domains (`example.com` → `ejemplo.com`), reformat numbers and dates, rename placeholders and break Markdown links. With it, every literal survives. The placeholders stand for `ZXQ0`, `ZXQ1`…, which an earlier test found the models copy more reliably than `{0}`, `__0__`, `<x0>` or numbers: intact in all 59 Opus-MT and SMaLL-100 translations and 41 of 44 NLLB-200 and M2M100 ones. The few texts where a placeholder doesn't survive, typically one standing for a number before a unit, go through the piece-by-piece path.
+
 ## Profiles
 
 `LanguageDetector(profile)` and `Translator(profile)` pick models from the measurements below. Accuracy comes from the [FLORES-200](https://github.com/facebookresearch/flores/tree/main/flores200) devtest set, which has the same 1,012 sentences in 204 language variants.
@@ -152,7 +241,18 @@ Speed is measured on the 206,448 FLORES-200 devtest sentences, shuffled, so no t
 - **`lid176` misses most of the long tail.** It has no label for 69 of the 176 languages. On the ones it knows it's accurate, and nothing else here comes close to its speed or size.
 - **`openlid-v3` is the big step up.** It knows 172 of the 176 languages and is right 96% of the time. It's about 5× slower than `lid176` in batches, but still labels about 11k sentences per second.
 - **`glotlid` is the most accurate on every measure**, especially on short texts. It's about 2.7× slower than `openlid-v3` for one text at a time.
-- **`bert-openlid` is dominated.** It's less accurate than `openlid-v3` and about 5× slower on paragraphs (see the first table), so no profile uses it.
+- **`bert-openlid` trades speed for size.** It's as accurate as `openlid-v3` over all languages (96.2% against 95.8%), a little less on the languages both know and on 40-character texts, and it downloads 25 MB instead of 1.2 GB. But it's a transformer: on the workloads in the first table it labels 3.5k short sentences per second against 210k for `openlid-v3`, and 570 paragraphs against 2.7k. No profile uses it because the profiles optimise for speed at each accuracy level. It's the best choice when download size matters more than throughput.
+
+The four choices side by side. Size and RAM are measured; RAM is resident memory after labelling 2,000 sentences in 200 languages (see [Detection memory](#detection-memory)). Speed is on the shuffled FLORES-200 sentences above, except `bert-openlid`, which is from the short-sentence workload in the first table.
+
+| Model | Profile | Download | RAM | Single sentence | Sentences/s | All | Common, 40 chars | Licence |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| `lid176` | `speed` | 0.9 MB | 22 MB | 0.11 ms | 55k | 50.4% | 83.9% | CC-BY-SA-3.0 |
+| `bert-openlid` | | 25 MB | 249 MB | 0.35 ms | 3.5k | 96.2% | 92.0% | MIT |
+| `openlid-v3` | `balance` | 1.2 GB | 1.14 GB | 0.20 ms | 11k | 95.8% | 96.0% | GPL-3.0 |
+| `glotlid` | `quality` | 1.7 GB | 1.27 GB | 0.55 ms | 9.6k | 97.7% | 97.2% | Apache-2.0 |
+
+`LanguageDetector(profile).plan()` and `noentenc.plan(profile)` report the download, RAM and licence of a profile's model before anything downloads. `allowed_licenses=` and `max_download_bytes=` make a profile refuse a model that breaks them.
 
 `openlid-v3` and `glotlid` tell apart varieties that `lid176` lumps together: they return `swh` (Swahili) or `swc` (Congo Swahili) where `lid176` returns `swa`. Pass `collapse_macrolanguages=True` to a model to fold them back.
 
@@ -187,3 +287,58 @@ Chinese and Japanese scores are low for every model because chrF++ counts word n
 - **fp32 adds a little over int8**: 0.25 points on average over the five pairs without Opus-MT. int8 downloads 4× less, loads 4× faster and needs less memory. On the M3, fp32 is nonetheless faster for single sentences and as fast in batches; other CPUs may differ.
 - **q4 hurts NLLB-200 and M2M100, so both default to int8.** At q4, NLLB-200 scored up to 7 points lower (en→ta 40.3 against 47.2, en→fi 42.3 against 47.5) and M2M100 up to 26 points lower (en→sw 18.3 against 44.8, en→de 36.9 against 52.8). Their q4 files are also 2 to 2.6× larger.
 - **M2M100 418M isn't in any profile.** At int8 it's about as accurate as SMaLL-100 (43.8 against 44.3 averaged over the 13 pairs): better into Japanese (25.4 against 21.7) and Chinese (20.6 against 18.5), worse on Swahili (44.8 against 52.9 into it) and Tamil (24.9 against 28.3). It's about 4× slower and needs the source language. NLLB-200 beats it on every pair except into Chinese and Japanese.
+
+### Opus-MT precision
+
+Opus-MT int8 against q4, the default, on the full FLORES-200 devtest (1,012 sentences per pair): the 8 Opus-MT pairs above plus 4 more.
+
+| Pair | q4 (default) | int8 |
+|---|---:|---:|
+| en→es | 51.92 | **52.17** |
+| es→en | 55.02 | **55.13** |
+| en→de | 59.75 | **59.83** |
+| de→en | 63.03 | **63.21** |
+| en→zh | 20.76 | **21.27** |
+| zh→en | 49.56 | **49.86** |
+| en→fi | 52.74 | **53.37** |
+| fr→de | 52.04 | **52.12** |
+| ja→en | **45.17** | 45.06 |
+| ru→en | 54.50 | **54.59** |
+| en→ru | 50.47 | **50.79** |
+| it→en | **56.53** | 56.50 |
+| Average | 50.96 | **51.16** |
+| Download | 287 MB | 107 MB |
+| RAM ([Memory](#memory)) | 1.08 GB | 630 MB |
+| Single sentence (en→es) | 54 to 65 ms | 82 to 88 ms |
+| Sentences/s, batches of 32 | 83 to 121 | 88 to 91 |
+
+The speed rows are the range over three interleaved runs of `scripts/benchmark_translation.py --models opus-mt --precisions q4 int8` on the M3.
+
+- **The two translate equally well.** int8 is 0.2 points ahead on average, and ahead on 10 of the 12 pairs, by at most 0.6 points. That is within the noise of a 1,012-sentence test set.
+- **int8 is lighter**: a 2.7× smaller download and 42% less RAM.
+- **q4 is faster one sentence at a time** on the M3, by about 25 ms. In batches the two are about as fast.
+
+q4 stays the default, because `speed` is about latency and the quality is the same. Pass `precision="int8"` to `OpusMTModel` when downloads or memory matter more. Profiles switch to int8 on their own when `max_download_bytes` rules out q4 (see [Routing](#routing)). Other CPUs, x86 ones with VNNI in particular, may run int8 faster; benchmark yours before you choose.
+
+To reproduce:
+
+```bash
+uv run --with sacrebleu python scripts/benchmark_accuracy.py translation --flores flores200_dataset \
+    --sentences 1012 --models opus-mt-q4 opus-mt-int8 \
+    --pairs en-es es-en en-de de-en en-zh zh-en en-fi fr-de ja-en ru-en en-ru it-en
+```
+
+### Routing
+
+Which model each profile uses for a pair:
+
+| Pair | `speed` | `balance` | `quality` |
+|---|---|---|---|
+| One of the 66 Opus-MT pairs | Opus-MT, q4 | Opus-MT, q4 | Opus-MT, q4 |
+| Another pair NLLB-200 covers on both sides | SMaLL-100 | NLLB-200, int8 | NLLB-200, fp32 |
+| No source language, or a source NLLB-200 lacks | SMaLL-100 | SMaLL-100 | SMaLL-100 |
+| A target SMaLL-100 lacks (Acehnese, Dzongkha...) | none | NLLB-200, int8 | NLLB-200, fp32 |
+
+So the three profiles pick the same model, with the same output, for every Opus-MT pair and for every text without a source language. `quality` only changes the output for pairs without an Opus-MT model, where it uses NLLB-200 at fp32 instead of int8. On FLORES-200 that adds 0.25 chrF++ on average.
+
+`allowed_licenses` and `max_download_bytes` skip a model to the next one down its column. Opus-MT q4 then gives way to Opus-MT int8, and NLLB-200 to SMaLL-100. A pair with nothing left raises `ModelConstraintError` before anything downloads. `Translator(profile).plan(target, source)` names the model a pair would use, with its licence, download size, RAM and cache state. `supports()` and `supported_languages()` answer which pairs work. None of these load or download a model.

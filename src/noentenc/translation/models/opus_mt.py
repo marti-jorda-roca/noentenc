@@ -1,13 +1,21 @@
+from __future__ import annotations
+
 import base64
 import json
-from collections.abc import Iterator
 from pathlib import Path
-from typing import ClassVar
-
-from tokenizers import Tokenizer
+from typing import TYPE_CHECKING, ClassVar
 
 from noentenc.languages import Language, LanguageSchema, UnsupportedLanguageError
-from noentenc.translation.models._seq2seq import Precision, Seq2SeqModel
+from noentenc.translation.models._seq2seq import (
+    Precision,
+    Seq2SeqModel,
+    tokenizer_class,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from tokenizers import Tokenizer
 
 L = Language
 
@@ -107,6 +115,7 @@ class OpusMTModel(Seq2SeqModel):
         revision: str | None = None,
         precision: Precision | str | None = None,
         num_threads: int | None = None,
+        cache_dir: str | Path | None = None,
     ) -> None:
         super().__init__(
             model,
@@ -114,6 +123,7 @@ class OpusMTModel(Seq2SeqModel):
             revision=revision,
             precision=precision,
             num_threads=num_threads,
+            cache_dir=cache_dir,
         )
         source, target = _language_pair(
             str(self.config.get("_name_or_path") or self.model)
@@ -133,19 +143,16 @@ class OpusMTModel(Seq2SeqModel):
         *,
         precision: Precision | str | None = None,
         num_threads: int | None = None,
+        cache_dir: str | Path | None = None,
     ) -> OpusMTModel:
-        source, target = Language(source_language), Language(target_language)
-        if (source, target) not in OPUS_MT_PAIRS:
-            available = sorted(str(t) for s, t in OPUS_MT_PAIRS if s == source)
-            raise UnsupportedLanguageError(
-                f"No Opus-MT model for {source}->{target}; targets from {source}: {available}"
-            )
+        repo, revision = pair_repo(source_language, target_language)
         return cls(
-            f"Xenova/opus-mt-{source}-{target}",
+            repo,
             only_local_files,
-            revision=OPUS_MT_REVISIONS[source, target],
+            revision=revision,
             precision=precision,
             num_threads=num_threads,
+            cache_dir=cache_dir,
         )
 
     def _load_tokenizer(self, files: dict[str, Path]) -> Tokenizer:
@@ -157,7 +164,7 @@ class OpusMTModel(Seq2SeqModel):
         ):
             charsmap = _spm_precompiled_charsmap(files["source.spm"].read_bytes())
             normalizer["precompiled_charsmap"] = base64.b64encode(charsmap).decode()
-        return Tokenizer.from_str(json.dumps(spec))
+        return tokenizer_class().from_str(json.dumps(spec))
 
     def _frame(
         self, ids: list[int], source: Language | None, target: Language
@@ -167,6 +174,17 @@ class OpusMTModel(Seq2SeqModel):
     def _banned_ids(self) -> tuple[int, ...]:
         # Marian reuses <pad> as the decoder start token; it must never be generated.
         return (self.config["pad_token_id"],)
+
+
+def pair_repo(source: Language | str, target: Language | str) -> tuple[str, str]:
+    """The Hugging Face repo and pinned revision of the Opus-MT model for a pair."""
+    source, target = Language(source), Language(target)
+    if (source, target) not in OPUS_MT_PAIRS:
+        available = sorted(str(t) for s, t in OPUS_MT_PAIRS if s == source)
+        raise UnsupportedLanguageError(
+            f"No Opus-MT model for {source}->{target}; targets from {source}: {available}"
+        )
+    return f"Xenova/opus-mt-{source}-{target}", OPUS_MT_REVISIONS[source, target]
 
 
 def _language_pair(name: str) -> tuple[Language, Language]:

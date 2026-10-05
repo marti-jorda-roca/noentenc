@@ -1,11 +1,17 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
-import onnxruntime as ort
 
 from noentenc._onnx import create_session
+from noentenc._optional import TRANSLATION_EXTRA
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import onnxruntime as ort
 
 # Once at least this fraction of the batch has finished, drop finished rows so the
 # remaining decoder steps only compute live sequences.
@@ -79,8 +85,8 @@ class Seq2SeqOnnxEngine:
         shape: DecoderShape,
         num_threads: int | None = None,
     ) -> None:
-        self._encoder = create_session(encoder_path, num_threads)
-        self._decoder = create_session(decoder_path, num_threads)
+        self._encoder = create_session(encoder_path, num_threads, TRANSLATION_EXTRA)
+        self._decoder = create_session(decoder_path, num_threads, TRANSLATION_EXTRA)
         self._shape = shape
         layers = range(shape.num_layers)
         self._decoder_cache = [
