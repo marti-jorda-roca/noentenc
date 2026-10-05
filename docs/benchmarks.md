@@ -151,6 +151,33 @@ Download sizes are the ONNX encoder and decoder that each precision loads.
 
 The Xenova q4 exports keep some weights in fp32, so for Opus-MT and M2M100 q4 is larger than int8. On batches it's also slower. For M2M100 and NLLB-200, q4 also translates much worse (see [Profiles](#translation-1)), so int8 is their default. Benchmark your own workload before you pick a precision.
 
+### Memory
+
+A loaded model takes much more RAM than its download: onnxruntime keeps the parsed graph, optimised copies of the weights and its working buffers. Resident memory added by loading each model and translating one sentence, in a fresh process with onnxruntime and tokenizers already imported (median of 3 runs):
+
+| Model | Precision | RAM | Download |
+|---|---|---:|---:|
+| Opus-MT en→es | int8 | 630 MB | 107 MB |
+| | q4 (default) | 1.08 GB | 287 MB |
+| | fp32 | 1.31 GB | 425 MB |
+| SMaLL-100 | int8 | 1.15 GB | 595 MB |
+| M2M100 418M | int8 | 2.38 GB | 603 MB |
+| NLLB-200 600M | int8 | 4.06 GB | 860 MB |
+| | fp32 | 3.81 GB (5.8 GB peak while loading) | 3.5 GB |
+
+`Translator` keeps at most `max_loaded_models` models loaded, two by default, and drops the least recently used one before it loads another. Peak resident memory of a `Translator()` that translates one sentence for each of 9 pairs, twice round (8 Opus-MT pairs at q4, plus Catalan→English on SMaLL-100):
+
+| `max_loaded_models` | Peak RAM | Models loaded at the end | Time |
+|---:|---:|---:|---:|
+| 1 | 1.6 GB | 1 | 8.2 s |
+| 2 (default) | 2.4 GB | 2 | 8.3 s |
+| 4 | 3.9 GB | 4 | 9.1 s |
+| `None` (no limit) | 5.0 GB | 9 | 6.2 s |
+
+With one sentence per call, the time is almost all loading: a limit reloads the 9 models on the second round, about 0.2 s each. Keep the limit low when memory is tight, and raise it when calls keep alternating between more pairs than it allows. `translator.unload()` drops every loaded model.
+
+These are macOS figures. macOS compresses memory that isn't being used, which lowers resident memory for idle models, so expect higher numbers without a limit on Linux. To reproduce, run `uv run --with psutil python scripts/measure_translation_memory.py models` and `... workload`.
+
 ## Profiles
 
 `LanguageDetector(profile)` and `Translator(profile)` pick models from the measurements below. Accuracy comes from the [FLORES-200](https://github.com/facebookresearch/flores/tree/main/flores200) devtest set, which has the same 1,012 sentences in 204 language variants.

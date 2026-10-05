@@ -107,6 +107,8 @@ translator.translate_dataset(df, "review", "review_en", Language.ENGLISH)
 
 Text of any length works. It is split into sentences, they are translated in one batch, and the translations are joined back with the original spaces, line breaks and blank lines. A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` instead of being cut silently. Pass `truncate=True` to translate only its start, and `detailed=True` to get a `Translation` that says whether input was dropped (`input_truncated`) or the output hit its length limit (`output_limit_reached`).
 
+`Translator` keeps the models it loads for later calls, at most two at a time by default. A loaded model needs a lot more RAM than its download: about 1.1 GB for an Opus-MT pair at q4 and 1.15 GB for SMaLL-100. Pass `max_loaded_models=` to change the limit (`None` for no limit), and call `translator.unload()` to free them all. See [memory](docs/benchmarks.md#memory).
+
 For bulk jobs, `errors="record"` keeps going past a text that fails. That text comes back as given, with its status and error in the detailed result (or in an `error_column` for `translate_dataset`), and the rest are still translated. Empty batches, blank texts and same-language requests return without loading a model.
 
 ## Trade speed for quality
@@ -140,6 +142,7 @@ On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 
 | [choose_detection_backend.py](docs/examples/choose_detection_backend.py) | Swap backends, restrict candidate languages, collapse macrolanguages. |
 | [choose_translation_model.py](docs/examples/choose_translation_model.py) | Pick a model, precision and thread count, and run offline. |
 | [translate_long_text.py](docs/examples/translate_long_text.py) | Translate emails and documents, and choose between an error and `truncate=True` for over-long sentences. |
+| [manage_memory.py](docs/examples/manage_memory.py) | Bound how many translation models stay loaded, and free them with `unload()`. |
 | [translate_bulk.py](docs/examples/translate_bulk.py) | Run bulk jobs with `errors="record"` so one bad row doesn't stop them, and skip model loads for empty, blank and same-language input. |
 | [choose_profile.py](docs/examples/choose_profile.py) | Trade latency for quality with the `speed`, `balance` and `quality` profiles. |
 | [custom_models.py](docs/examples/custom_models.py) | Plug your own detector and translator into the same API. |

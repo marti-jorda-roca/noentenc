@@ -121,6 +121,18 @@ result.output_limit_reached  # True if the output may be cut short
 
 Blank texts, and texts whose source language is already the target, come back unchanged without loading a model. Their detailed status is `unchanged`.
 
+### Memory
+
+A `Translator` loads a model the first time a pair needs it and keeps it for later calls. It keeps at most two by default. When a pair needs a third, the least recently used model is dropped first, and it's loaded again if a later call needs it. Each one takes 0.6 to 1.2 GB of RAM for Opus-MT and SMaLL-100, and up to 4 GB for NLLB-200, far more than its download.
+
+```python
+translator = Translator(
+    max_loaded_models=4
+)  # fewer reloads, more memory; None for no limit
+translator.loaded_models  # the models it holds right now
+translator.unload()  # free them; the next call loads what it needs again
+```
+
 ### Keep going past bad rows
 
 By default the first text that fails to translate raises, which suits scripts you watch. For bulk jobs pass `errors="record"`. A text that fails comes back as given with status `failed` and the error message, and the rest of the batch is still translated. Errors that apply to the whole call still raise: an invalid `batch_size`, an unknown language or an unsupported pair.

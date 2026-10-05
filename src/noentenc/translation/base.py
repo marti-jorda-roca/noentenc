@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+from collections import OrderedDict
 from collections.abc import Callable, Hashable
 from typing import TYPE_CHECKING, Literal, overload
 
@@ -29,6 +31,10 @@ _Pick = tuple[Hashable, Callable[[], BaseModel]] | None
 
 # What to do when translating a text raises: raise it, or record it in the result.
 ErrorPolicy = Literal["raise", "record"]
+
+# Models a profile-based `Translator` keeps loaded at once. Two cover a pair model plus the
+# SMaLL-100 fallback; see docs/benchmarks.md#memory for the RAM each model takes.
+DEFAULT_MAX_LOADED_MODELS = 2
 
 
 def _opus_mt(source: Language | None, target: Language) -> _Pick:
@@ -86,16 +92,50 @@ class Translator:
 
     Without a source language, or for a language NLLB-200 lacks, they fall back to
     SMaLL-100. NLLB-200 is licensed CC-BY-NC-4.0 (non-commercial) and warns when loaded.
+
+    A profile keeps at most `max_loaded_models` models loaded (`None`: no limit). When a
+    pair needs another one, the least recently used is dropped first, and loaded again if a
+    later call needs it. A higher limit saves reloads when calls alternate between many
+    pairs, at 0.6 to 1.2 GB of RAM per Opus-MT or SMaLL-100 model (docs/benchmarks.md).
+    `unload()` drops them all.
     """
 
-    def __init__(self, model: BaseModel | Profile | str | None = None) -> None:
+    def __init__(
+        self,
+        model: BaseModel | Profile | str | None = None,
+        *,
+        max_loaded_models: int | None = DEFAULT_MAX_LOADED_MODELS,
+    ) -> None:
         if isinstance(model, BaseModel):
             self.model: BaseModel | None = model
             self.profile = Profile.SPEED  # unused: `model` translates every pair
         else:
             self.model = None
             self.profile = Profile(model or Profile.SPEED)
-        self._default_models: dict[Hashable, BaseModel] = {}
+        self.max_loaded_models = _check_max_loaded_models(max_loaded_models)
+        # Loaded profile models, least recently used first.
+        self._default_models: OrderedDict[Hashable, BaseModel] = OrderedDict()
+        self._models_lock = threading.Lock()
+
+    @property
+    def loaded_models(self) -> list[BaseModel]:
+        """The models this translator loaded and still holds, least recently used first.
+
+        Empty when it was given a `model`: that one belongs to the caller.
+        """
+        with self._models_lock:
+            return list(self._default_models.values())
+
+    def unload(self) -> None:
+        """Drop every model this translator loaded, so their memory can be freed.
+
+        Releases the ONNX sessions and tokenizers once nothing else references them; a
+        call already translating keeps its model until it returns. The translator stays
+        usable and loads models again when needed. A `model` passed to the constructor
+        belongs to the caller and is kept.
+        """
+        with self._models_lock:
+            self._default_models.clear()
 
     @overload
     def translate(
@@ -320,14 +360,46 @@ class Translator:
             picked = candidate(source, target)
             if picked is None:
                 continue
-            key, load = picked
-            if key not in self._default_models:
-                self._default_models[key] = load()
-            return self._default_models[key]
+            return self._cached(*picked)
         pair = f"into {target}" if source is None else f"{source}->{target}"
         raise UnsupportedLanguageError(
             f"No {self.profile} model translates {pair}; pass a model explicitly"
         )
+
+    def _cached(self, key: Hashable, load: Callable[[], BaseModel]) -> BaseModel:
+        """The loaded model for `key`, loading it after evicting down to the limit.
+
+        Eviction only drops the cache's reference: a call that is translating with an
+        evicted model keeps it alive until it returns.
+        """
+        with self._models_lock:
+            model = self._default_models.get(key)
+            if model is not None:
+                self._default_models.move_to_end(key)
+                return model
+            limit = self.max_loaded_models
+            # Evict before loading, so the old models can be freed first.
+            while limit is not None and len(self._default_models) >= limit:
+                self._default_models.popitem(last=False)
+        model = load()
+        with self._models_lock:
+            self._default_models[key] = model
+            self._default_models.move_to_end(key)
+            while limit is not None and len(self._default_models) > limit:
+                self._default_models.popitem(last=False)
+        return model
+
+
+def _check_max_loaded_models(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(
+            f"max_loaded_models must be an int or None, got {type(value).__name__}"
+        )
+    if value < 1:
+        raise ValueError(f"max_loaded_models must be >= 1, got {value}")
+    return value
 
 
 def _check_arguments(
