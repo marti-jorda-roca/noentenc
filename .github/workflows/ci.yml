@@ -92,8 +92,6 @@ jobs:
         python: ["3.11", "3.12", "3.13", "3.14"]
     env:
       UV_PYTHON: ${{ matrix.python }}
-      NOENTENC_CACHE: ${{ runner.temp }}/noentenc
-      HF_HOME: ${{ runner.temp }}/huggingface
     defaults:
       run:
         shell: bash
@@ -111,10 +109,14 @@ jobs:
       - run: uv build --wheel --no-sources
       - name: Detection quickstart, core install only
         run: uv run --no-project --isolated --with dist/*.whl python scripts/smoke_quickstart.py detection
+        env:
+          NOENTENC_CACHE: ${{ runner.temp }}/noentenc
       - name: Translation quickstart, translation extra
         run: |
           wheel=$(ls dist/*.whl)
           uv run --no-project --isolated --with "noentenc[translation] @ $wheel" python scripts/smoke_quickstart.py translation
+        env:
+          HF_HOME: ${{ runner.temp }}/huggingface
 
   integration-tests:
     name: Integration tests / ${{ matrix.suite }}
