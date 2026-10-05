@@ -14,6 +14,7 @@ from noentenc.translation.models import _seq2seq
 from noentenc.translation.models._engine import GenerationConfig
 from noentenc.translation.models._hub import resolve_files
 from noentenc.translation.models._seq2seq import Precision
+from noentenc.translation.models.base import InputTooLongError
 from noentenc.translation.models.m2m100 import M2M100Model, _drop_invalid_merges
 from noentenc.translation.models.nllb import NLLBModel
 from noentenc.translation.models.opus_mt import (
@@ -25,7 +26,7 @@ from noentenc.translation.models.opus_mt import (
 from noentenc.translation.models.small100 import SMaLL100Model
 
 EN, ES, FR, ZH = Language.ENGLISH, Language.SPANISH, Language.FRENCH, Language.CHINESE
-WORDS = ["hello", "world", "hola", "mundo"]
+WORDS = ["hello", "world", "hola", "mundo", "Hello", "end."]
 
 
 class FakeEngine:
@@ -193,11 +194,61 @@ def test_batch_is_sorted_padded_chunked_and_restored(m2m_dir: Path) -> None:
     assert config.max_new_tokens == min(model.max_length, 2 * 6 + 10)
 
 
-def test_inputs_are_truncated_to_max_length(m2m_dir: Path) -> None:
+def test_long_sentences_raise_unless_truncated(m2m_dir: Path) -> None:
     model = SMaLL100Model(m2m_dir)
-    model.predict(" ".join(["hello"] * 40), EN)
+    text = " ".join(["hello"] * 40)
+    with pytest.raises(InputTooLongError, match="at most 14 tokens.*has 40"):
+        model.predict(text, EN)
+    assert FakeEngine.calls == []
+    (result,) = model.predict_batch_detailed([text], EN, truncate=True)
     input_ids, _, _ = FakeEngine.calls[0]
     assert input_ids.shape[1] == model.max_length
+    assert result.text == " ".join(["hello"] * 14)
+    assert result.input_truncated
+
+
+def test_every_sentence_of_a_long_text_reaches_inference(m2m_dir: Path) -> None:
+    model = SMaLL100Model(m2m_dir)
+    # 121 tokens, far over the 16-token limit, in sentences of 3 tokens.
+    text = " ".join(["Hello world end."] * 40) + " Hello mundo end."
+    assert model.predict(text, EN) == text
+    last = token_ids(model, ["__en__", "Hello", "mundo", "end.", "</s>"])
+    fed = [
+        row[mask == 1].tolist()
+        for ids, masks, _ in FakeEngine.calls
+        for row, mask in zip(ids, masks, strict=True)
+    ]
+    assert len(fed) == 41
+    assert any(row == last for row in fed)
+
+
+def test_whitespace_between_sentences_survives(m2m_dir: Path) -> None:
+    model = SMaLL100Model(m2m_dir)
+    texts = ["Hello end. Hello world end.\n\nhola end.\nmundo\n", "  \n", ""]
+    assert model.predict_batch(texts, EN) == texts
+    # The whitespace-only texts never reach the model.
+    (input_ids, _, _) = FakeEngine.calls[0]
+    assert len(input_ids) == 4
+
+
+def test_output_limit_is_reported(
+    m2m_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = SMaLL100Model(m2m_dir)
+    hello = model._token_id("hello")
+
+    def endless(
+        _self: FakeEngine,
+        input_ids: np.ndarray,
+        _mask: np.ndarray,
+        config: GenerationConfig,
+    ) -> list[list[int]]:
+        return [[hello] * config.max_new_tokens for _ in input_ids]
+
+    monkeypatch.setattr(FakeEngine, "generate", endless)
+    (result,) = model.predict_batch_detailed(["Hello end. Hello world"], EN)
+    assert result.output_limit_reached
+    assert not result.input_truncated
 
 
 def test_empty_batch(m2m_dir: Path) -> None:

@@ -89,3 +89,20 @@ def test_default_translator() -> None:
     assert (
         "tiempo" in Translator().translate("The weather is nice today.", ES, EN).lower()
     )
+
+
+def test_long_text_keeps_every_sentence_and_line_break() -> None:
+    model = load(lambda local: OpusMTModel.from_pair(EN, ES, only_local_files=local))
+    paragraph = " ".join(
+        f"Sentence number {i} talks about the weather in a small town near the sea."
+        for i in range(40)
+    )
+    text = f"{paragraph}\n\n{paragraph}\nThe last line is about Barcelona."
+    result = Translator(model).translate(text, ES, EN, detailed=True)
+    first, blank, second, last = result.text.split("\n")
+    assert blank == ""
+    assert "39" in first
+    assert "39" in second
+    assert "Barcelona" in last
+    assert not result.input_truncated
+    assert not result.output_limit_reached
