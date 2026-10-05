@@ -89,8 +89,13 @@ def test_translate_dataset_rejects_other_types(translator: Translator) -> None:
 
 
 def test_detailed_results_default_to_nothing_missing(translator: Translator) -> None:
-    assert translator.translate("hola", EN, detailed=True) == Translation("HOLA:en")
-    assert translator.translate_batch(["a"], ES, detailed=True) == [Translation("A:es")]
+    upper = "UpperModel(upper)"
+    assert translator.translate("hola", EN, detailed=True) == Translation(
+        "HOLA:en", model=upper
+    )
+    assert translator.translate_batch(["a"], ES, EN, detailed=True) == [
+        Translation("A:es", source_language=EN, model=upper)
+    ]
 
 
 class TruncatingModel(UpperModel):
@@ -327,8 +332,8 @@ def test_invalid_texts_and_errors_fail_before_loading_a_model() -> None:
         translator.translate_batch(["a", None], ES, EN)  # ty: ignore[invalid-argument-type]
     with pytest.raises(ValueError, match="errors must be"):
         translator.translate_batch(["a"], ES, EN, errors="ignore")  # ty: ignore[invalid-argument-type]
-    with pytest.raises(ValueError, match="is not a valid Language"):
-        translator.translate_batch([], "xx", EN)  # ty: ignore[invalid-argument-type]
+    with pytest.raises(UnsupportedLanguageError, match="'xx' is not a language"):
+        translator.translate_batch([], "xx", EN)
     assert FakeOpus.created == []
 
 
@@ -354,14 +359,17 @@ def test_blank_and_same_language_results_are_unchanged() -> None:
     model = UpperModel()
     translator = Translator(model)
     results = translator.translate_batch(["a", " ", "b"], ES, EN, detailed=True)
+    upper = "UpperModel(upper)"
     assert results == [
-        Translation("A:es"),
-        Translation(" ", status=TranslationStatus.UNCHANGED),
-        Translation("B:es"),
+        Translation("A:es", source_language=EN, model=upper),
+        Translation(" ", status=TranslationStatus.UNCHANGED, source_language=EN),
+        Translation("B:es", source_language=EN, model=upper),
     ]
     assert model.batches == [["a", "b"]]
     (same,) = translator.translate_batch(["a"], EN, EN, detailed=True)
-    assert same == Translation("a", status=TranslationStatus.UNCHANGED)
+    assert same == Translation(
+        "a", status=TranslationStatus.UNCHANGED, source_language=EN
+    )
 
 
 def test_explicit_model_rejects_unsupported_pairs_before_translating() -> None:

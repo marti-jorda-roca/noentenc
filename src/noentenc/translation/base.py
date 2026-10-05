@@ -3,13 +3,14 @@ from __future__ import annotations
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Hashable
-from typing import TYPE_CHECKING, Literal, overload
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Final, Literal, overload
 
 from tqdm import tqdm
 
 from noentenc._batching import check_batch_size, check_texts, is_blank
 from noentenc._dataframe import column_values, with_column
-from noentenc.languages import Language
+from noentenc.languages import Language, UnsupportedLanguageError, to_language
 from noentenc.profiles import Profile
 from noentenc.translation import _routing
 from noentenc.translation.models.base import (
@@ -24,12 +25,42 @@ if TYPE_CHECKING:
     import pandas as pd
     import polars as pl
 
+    from noentenc.language_detection import LanguageDetector
+
 # What to do when translating a text raises: raise it, or record it in the result.
 ErrorPolicy = Literal["raise", "record"]
+
+# With `source_language="auto"`, what to do with a text whose language the detector can't
+# tell, or that no model translates: keep it as given (with a status), translate it
+# without a source language, or fail the call.
+UnknownSourcePolicy = Literal["keep", "fallback", "raise"]
+
+# Pass as `source_language` to detect each text's language.
+AUTO: Final = "auto"
 
 # Models a profile-based `Translator` keeps loaded at once. Two cover a pair model plus the
 # SMaLL-100 fallback; see docs/benchmarks.md#memory for the RAM each model takes.
 DEFAULT_MAX_LOADED_MODELS = 2
+
+# The detector `source_language="auto"` builds when none is given: the profile's model,
+# abstaining like the setting docs/benchmarks.md#conservative-detection tested on lid176.
+AUTO_DETECTION_SETTINGS: dict[str, float] = {"min_letters": 4, "min_score": 0.5}
+
+_NO_LINGUISTIC_CONTENT = "zxx"
+
+
+class SourceLanguageError(UnsupportedLanguageError):
+    """With `unknown_source="raise"`, a text's language couldn't be used."""
+
+
+@dataclass(frozen=True)
+class _Group:
+    """Texts that share a source language, and the model that translates them."""
+
+    source: Language | None
+    indices: list[int]
+    key: Hashable
+    load: Callable[[], BaseModel]
 
 
 class Translator:
@@ -48,6 +79,16 @@ class Translator:
     Without a source language, or for a language NLLB-200 lacks, they fall back to
     SMaLL-100. NLLB-200 is licensed CC-BY-NC-4.0 (non-commercial) and warns when loaded.
 
+    `source_language="auto"` detects each text's language with `detector` (by default
+    the profile's `LanguageDetector`, abstaining on short or uncertain text), then
+    translates each language with the model the profile picks for it. Texts already in
+    the target language, and texts without linguistic content, come back unchanged.
+    `unknown_source` decides what happens to texts whose language the detector can't
+    tell or no model translates: `"keep"` returns them as given with status
+    `UNKNOWN_SOURCE` or `UNSUPPORTED_SOURCE`, `"fallback"` translates them without a
+    source language, and `"raise"` fails the call with `SourceLanguageError` before
+    anything is translated.
+
     A profile keeps at most `max_loaded_models` models loaded (`None`: no limit). When a
     pair needs another one, the least recently used is dropped first, and loaded again if a
     later call needs it. A higher limit saves reloads when calls alternate between many
@@ -58,6 +99,9 @@ class Translator:
     or with `only_local_files` only reads them from there, failing at once when a model
     is missing. `noentenc.prepare` downloads them ahead of time. For a `model` you pass,
     give these options to the model instead.
+
+    Languages can be `Language` members or codes and names that `to_language` accepts,
+    such as `"es"`, `"spa"`, `"es-ES"` or `"spanish"`.
     """
 
     def __init__(
@@ -67,6 +111,7 @@ class Translator:
         max_loaded_models: int | None = DEFAULT_MAX_LOADED_MODELS,
         only_local_files: bool = False,
         cache_dir: str | Path | None = None,
+        detector: LanguageDetector | None = None,
     ) -> None:
         if isinstance(model, BaseModel):
             if only_local_files or cache_dir is not None:
@@ -75,16 +120,32 @@ class Translator:
                     "loads; pass them to your model instead"
                 )
             self.model: BaseModel | None = model
-            self.profile = Profile.SPEED  # unused: `model` translates every pair
+            self.profile = Profile.SPEED  # only picks the default detector
         else:
             self.model = None
             self.profile = Profile(model or Profile.SPEED)
         self.only_local_files = only_local_files
         self.cache_dir = cache_dir
         self.max_loaded_models = _check_max_loaded_models(max_loaded_models)
+        self._detector = detector
         # Loaded profile models, least recently used first.
         self._default_models: OrderedDict[Hashable, BaseModel] = OrderedDict()
         self._models_lock = threading.Lock()
+
+    @property
+    def detector(self) -> LanguageDetector:
+        """The detector `source_language="auto"` uses, built on first use."""
+        with self._models_lock:
+            if self._detector is None:
+                from noentenc.language_detection import LanguageDetector
+
+                self._detector = LanguageDetector(
+                    self.profile,
+                    only_local_files=self.only_local_files,
+                    cache_dir=self.cache_dir,
+                    **AUTO_DETECTION_SETTINGS,  # ty: ignore[invalid-argument-type]
+                )
+            return self._detector
 
     @property
     def loaded_models(self) -> list[BaseModel]:
@@ -110,44 +171,54 @@ class Translator:
     def translate(
         self,
         text: str,
-        target_language: Language,
-        source_language: Language | None = None,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
         *,
         truncate: bool = False,
         detailed: Literal[False] = False,
+        unknown_source: UnknownSourcePolicy = "keep",
     ) -> str: ...
 
     @overload
     def translate(
         self,
         text: str,
-        target_language: Language,
-        source_language: Language | None = None,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
         *,
         truncate: bool = False,
         detailed: Literal[True],
+        unknown_source: UnknownSourcePolicy = "keep",
     ) -> Translation: ...
 
     def translate(
         self,
         text: str,
-        target_language: Language,
-        source_language: Language | None = None,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
         *,
         truncate: bool = False,
         detailed: bool = False,
+        unknown_source: UnknownSourcePolicy = "keep",
     ) -> str | Translation:
         """Translate `text`, sentence by sentence, keeping its whitespace and line breaks.
 
         A sentence longer than the model reads raises `InputTooLongError`; with
         `truncate` its end is dropped instead. With `detailed` the result is a
-        `Translation`, which says whether input was dropped or output cut short.
+        `Translation`, which says whether input was dropped or output cut short, which
+        source language and model were used, and what the detector found.
 
         Blank text, and text whose `source_language` is `target_language`, come back
-        unchanged without loading a model.
+        unchanged without loading a model. `source_language="auto"` detects it.
         """
         (translation,) = self._translate(
-            [text], target_language, source_language, 32, truncate, "raise"
+            [text],
+            target_language,
+            source_language,
+            32,
+            truncate,
+            "raise",
+            unknown_source,
         )
         return translation if detailed else translation.text
 
@@ -155,48 +226,60 @@ class Translator:
     def translate_batch(
         self,
         texts: list[str],
-        target_language: Language,
-        source_language: Language | None = None,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
         batch_size: int = 32,
         *,
         truncate: bool = False,
         detailed: Literal[False] = False,
         errors: ErrorPolicy = "raise",
+        unknown_source: UnknownSourcePolicy = "keep",
     ) -> list[str]: ...
 
     @overload
     def translate_batch(
         self,
         texts: list[str],
-        target_language: Language,
-        source_language: Language | None = None,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
         batch_size: int = 32,
         *,
         truncate: bool = False,
         detailed: Literal[True],
         errors: ErrorPolicy = "raise",
+        unknown_source: UnknownSourcePolicy = "keep",
     ) -> list[Translation]: ...
 
     def translate_batch(
         self,
         texts: list[str],
-        target_language: Language,
-        source_language: Language | None = None,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
         batch_size: int = 32,
         *,
         truncate: bool = False,
         detailed: bool = False,
         errors: ErrorPolicy = "raise",
+        unknown_source: UnknownSourcePolicy = "keep",
     ) -> list[str] | list[Translation]:
-        """Translate each of `texts`, like `translate`.
+        """Translate each of `texts`, like `translate`, in input order.
 
         An empty list returns at once. With `errors="record"` a text whose translation
         raises comes back as given, and its detailed result has status `FAILED` and
         the error; the other texts are still translated. Arguments that apply to the
         whole call (batch size, languages, an unsupported pair) always raise.
+
+        With `source_language="auto"` the texts are grouped by detected language, so
+        each model loads once per call and translates its texts in batches.
         """
         translations = self._translate(
-            texts, target_language, source_language, batch_size, truncate, errors
+            texts,
+            target_language,
+            source_language,
+            batch_size,
+            truncate,
+            errors,
+            unknown_source,
         )
         return translations if detailed else [t.text for t in translations]
 
@@ -206,14 +289,17 @@ class Translator:
         dataset: pl.DataFrame,
         target_column: str,
         result_column: str,
-        target_language: Language,
-        source_language: Language | None = None,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
         batch_size: int = 32,
         show_progress: bool = True,
         *,
         truncate: bool = False,
         errors: ErrorPolicy = "raise",
         error_column: str | None = None,
+        unknown_source: UnknownSourcePolicy = "keep",
+        status_column: str | None = None,
+        source_column: str | None = None,
     ) -> pl.DataFrame: ...
 
     @overload
@@ -222,14 +308,17 @@ class Translator:
         dataset: pd.DataFrame,
         target_column: str,
         result_column: str,
-        target_language: Language,
-        source_language: Language | None = None,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
         batch_size: int = 32,
         show_progress: bool = True,
         *,
         truncate: bool = False,
         errors: ErrorPolicy = "raise",
         error_column: str | None = None,
+        unknown_source: UnknownSourcePolicy = "keep",
+        status_column: str | None = None,
+        source_column: str | None = None,
     ) -> pd.DataFrame: ...
 
     def translate_dataset(
@@ -237,96 +326,239 @@ class Translator:
         dataset: pl.DataFrame | pd.DataFrame,
         target_column: str,
         result_column: str,
-        target_language: Language,
-        source_language: Language | None = None,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
         batch_size: int = 32,
         show_progress: bool = True,
         *,
         truncate: bool = False,
         errors: ErrorPolicy = "raise",
         error_column: str | None = None,
+        unknown_source: UnknownSourcePolicy = "keep",
+        status_column: str | None = None,
+        source_column: str | None = None,
     ) -> pl.DataFrame | pd.DataFrame:
         """Return `dataset` with `result_column` holding the translation of `target_column`.
 
-        Works with polars and pandas frames; null texts stay null. Texts are translated
-        like `translate_batch`, including `truncate` and `errors`. With
+        Works with polars and pandas frames; rows keep their order and null texts stay
+        null. Texts are translated like `translate_batch`, including `truncate`,
+        `errors`, `source_language="auto"` and `unknown_source`. With
         `errors="record"` a row whose translation raises gets a null translation, and
         its error in `error_column` if given (null for the other rows).
+
+        `status_column` adds each row's `TranslationStatus` and `source_column` the
+        source language used (detected, with `"auto"`); both are null for null texts.
         With `show_progress` a tqdm bar tracks the rows translated so far.
         """
-        _check_arguments(target_language, source_language, batch_size, errors)
+        _check_arguments(
+            target_language, source_language, batch_size, errors, unknown_source
+        )
         values = column_values(dataset, target_column)
         rows = [i for i, value in enumerate(values) if isinstance(value, str)]
-        texts = [values[i] for i in rows]
-        translations: list[Translation] = []
         with tqdm(
-            total=len(texts), desc="Translating", disable=not show_progress
+            total=len(rows), desc="Translating", disable=not show_progress
         ) as progress:
-            for start in range(0, len(texts), batch_size):
-                chunk = texts[start : start + batch_size]
-                translations += self._translate(
-                    chunk,
-                    target_language,
-                    source_language,
-                    batch_size,
-                    truncate,
-                    errors,
-                )
-                progress.update(len(chunk))
+            translations = self._translate(
+                [values[i] for i in rows],
+                target_language,
+                source_language,
+                batch_size,
+                truncate,
+                errors,
+                unknown_source,
+                progress=progress.update,
+            )
         results: list[str | None] = [None] * len(values)
         failures: list[str | None] = [None] * len(values)
+        statuses: list[str | None] = [None] * len(values)
+        sources: list[str | None] = [None] * len(values)
         for i, translation in zip(rows, translations, strict=True):
             if translation.status is TranslationStatus.FAILED:
                 failures[i] = translation.error
             else:
                 results[i] = translation.text
+            statuses[i] = str(translation.status)
+            if translation.source_language is not None:
+                sources[i] = str(translation.source_language)
         dataset = with_column(dataset, result_column, results, strings=True)
-        if error_column is not None:
-            dataset = with_column(dataset, error_column, failures, strings=True)
+        for column, extra in (
+            (error_column, failures),
+            (status_column, statuses),
+            (source_column, sources),
+        ):
+            if column is not None:
+                dataset = with_column(dataset, column, extra, strings=True)
         return dataset
 
     def _translate(
         self,
         texts: list[str],
-        target_language: Language,
-        source_language: Language | None,
+        target_language: Language | str,
+        source_language: Language | str | None,
+        batch_size: int,
+        truncate: bool,
+        errors: ErrorPolicy,
+        unknown_source: UnknownSourcePolicy,
+        progress: Callable[[int], object] | None = None,
+    ) -> list[Translation]:
+        """Translate `texts`, answering what needs no model before loading one."""
+        check_texts(texts)
+        target, source, auto = _check_arguments(
+            target_language, source_language, batch_size, errors, unknown_source
+        )
+        # Blank texts and same-language requests stay as given; translate the rest.
+        results = [
+            Translation(t, status=TranslationStatus.UNCHANGED, source_language=source)
+            for t in texts
+        ]
+        pending = [i for i, text in enumerate(texts) if not is_blank(text)]
+        if auto:
+            groups = self._auto_groups(
+                texts, pending, target, batch_size, unknown_source, results
+            )
+        elif pending and source != target:
+            key, load = self._route(source, target)
+            groups = [_Group(source, pending, key, load)]
+        else:
+            groups = []
+        if progress is not None:
+            progress(len(texts) - sum(len(group.indices) for group in groups))
+        # Texts translated by the same model go together, so it loads once per call.
+        order = {group.key: n for n, group in reversed(list(enumerate(groups)))}
+        for group in sorted(groups, key=lambda g: order[g.key]):
+            model = group.load()
+            name = _model_name(model)
+            chunk = len(group.indices) if progress is None else batch_size
+            for start in range(0, len(group.indices), chunk):
+                indices = group.indices[start : start + chunk]
+                translated = self._run(
+                    model,
+                    [texts[i] for i in indices],
+                    target,
+                    group.source,
+                    batch_size,
+                    truncate,
+                    errors,
+                )
+                for i, translation in zip(indices, translated, strict=True):
+                    results[i] = replace(
+                        translation,
+                        source_language=group.source,
+                        detected_language=results[i].detected_language,
+                        detection_score=results[i].detection_score,
+                        model=name,
+                    )
+                if progress is not None:
+                    progress(len(indices))
+        return results
+
+    @staticmethod
+    def _run(
+        model: BaseModel,
+        texts: list[str],
+        target: Language,
+        source: Language | None,
         batch_size: int,
         truncate: bool,
         errors: ErrorPolicy,
     ) -> list[Translation]:
-        """Translate `texts`, answering what needs no model before loading one."""
-        check_texts(texts)
-        target, source = _check_arguments(
-            target_language, source_language, batch_size, errors
-        )
-        # Blank texts and same-language requests stay as given; translate the rest.
-        results = [Translation(t, status=TranslationStatus.UNCHANGED) for t in texts]
-        pending = [
-            i for i, text in enumerate(texts) if not is_blank(text) and source != target
-        ]
-        if not pending:
-            return results
-        model = self._model_for(source, target)
-
         def run(batch: list[str]) -> list[Translation]:
             return model.predict_batch_detailed(
                 batch, target, source, batch_size, truncate=truncate
             )
 
-        batch = [texts[i] for i in pending]
-        translated = run(batch) if errors == "raise" else _record_failures(batch, run)
-        for i, translation in zip(pending, translated, strict=True):
-            results[i] = translation
-        return results
+        return run(texts) if errors == "raise" else _record_failures(texts, run)
 
-    def _model_for(self, source: Language | None, target: Language) -> BaseModel:
+    def _auto_groups(
+        self,
+        texts: list[str],
+        pending: list[int],
+        target: Language,
+        batch_size: int,
+        unknown_source: UnknownSourcePolicy,
+        results: list[Translation],
+    ) -> list[_Group]:
+        """Detect the language of each pending text and group them by source.
+
+        Fills `results` for the texts that won't be translated, and raises before any
+        model loads when `unknown_source="raise"` meets a text it can't translate.
+        """
+        detections = self.detector.detect_batch(
+            [texts[i] for i in pending], batch_size=batch_size, detailed=True
+        )
+        by_source: dict[Language | None, list[int]] = {}
+        unusable: list[tuple[int, TranslationStatus]] = []
+        for i, detection in zip(pending, detections, strict=True):
+            results[i] = replace(
+                results[i],
+                detected_language=detection.language,
+                detection_score=detection.score,
+            )
+            if detection.language == _NO_LINGUISTIC_CONTENT:
+                continue
+            language = to_language(detection.language, None)
+            if language == target:
+                results[i] = replace(results[i], source_language=language)
+            elif language is None:
+                status = (
+                    TranslationStatus.UNKNOWN_SOURCE
+                    if detection.language == "und"
+                    else TranslationStatus.UNSUPPORTED_SOURCE
+                )
+                unusable.append((i, status))
+            else:
+                by_source.setdefault(language, []).append(i)
+        groups: list[_Group] = []
+        for language, indices in by_source.items():
+            try:
+                key, load = self._route(language, target)
+            except UnsupportedLanguageError:
+                unusable += [(i, TranslationStatus.UNSUPPORTED_SOURCE) for i in indices]
+                continue
+            groups.append(_Group(language, indices, key, load))
+        return groups + self._unusable(texts, target, unusable, unknown_source, results)
+
+    def _unusable(
+        self,
+        texts: list[str],
+        target: Language,
+        unusable: list[tuple[int, TranslationStatus]],
+        policy: UnknownSourcePolicy,
+        results: list[Translation],
+    ) -> list[_Group]:
+        """Apply `unknown_source` to texts that can't be translated from their language."""
+        if not unusable:
+            return []
+        if policy == "raise":
+            i, status = min(unusable)
+            raise SourceLanguageError(
+                f"texts[{i}] ({status}, detected {results[i].detected_language!r}): "
+                f"{texts[i][:60]!r}; pass unknown_source='keep' or 'fallback' to "
+                "translate the other texts"
+            )
+        if policy == "fallback":
+            try:
+                key, load = self._route(None, target)
+            except UnsupportedLanguageError:
+                pass
+            else:
+                return [_Group(None, sorted(i for i, _ in unusable), key, load)]
+        for i, status in unusable:
+            results[i] = replace(results[i], status=status)
+        return []
+
+    def _route(
+        self, source: Language | None, target: Language
+    ) -> tuple[Hashable, Callable[[], BaseModel]]:
+        """The cache key and loader of the model for a pair; raises if there is none."""
         if self.model is not None:
             # Checked here so an unsupported pair fails the call even when
             # `errors="record"` keeps per-text failures.
             self.model.schema.validate(source, target, type(self.model).__name__)
-            return self.model
+            model = self.model
+            return id(model), lambda: model
         choice = _routing.choose(self.profile, source, target)
-        return self._cached(
+        return choice, lambda: self._cached(
             choice,
             lambda: choice.build(
                 only_local_files=self.only_local_files, cache_dir=self.cache_dir
@@ -357,6 +589,10 @@ class Translator:
         return model
 
 
+def _model_name(model: BaseModel) -> str:
+    return f"{type(model).__name__}({getattr(model, 'model', '')})"
+
+
 def _check_max_loaded_models(value: object) -> int | None:
     if value is None:
         return None
@@ -370,16 +606,29 @@ def _check_max_loaded_models(value: object) -> int | None:
 
 
 def _check_arguments(
-    target: Language,
-    source: Language | None,
+    target: Language | str,
+    source: Language | str | None,
     batch_size: int,
     errors: ErrorPolicy,
-) -> tuple[Language, Language | None]:
-    """Validate what applies to a whole call; return the languages as `Language`s."""
+    unknown_source: UnknownSourcePolicy = "keep",
+) -> tuple[Language, Language | None, bool]:
+    """Validate what applies to a whole call.
+
+    Returns the target and source as `Language`s (the source None when not given or
+    `"auto"`), and whether the source is `"auto"`.
+    """
     check_batch_size(batch_size)
     if errors not in ("raise", "record"):
         raise ValueError(f"errors must be 'raise' or 'record', got {errors!r}")
-    return Language(target), None if source is None else Language(source)
+    if unknown_source not in ("keep", "fallback", "raise"):
+        raise ValueError(
+            "unknown_source must be 'keep', 'fallback' or 'raise', "
+            f"got {unknown_source!r}"
+        )
+    auto = source == AUTO
+    if source is None or auto:
+        return to_language(target), None, auto
+    return to_language(target), to_language(source), False
 
 
 def _record_failures(
