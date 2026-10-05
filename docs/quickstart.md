@@ -133,6 +133,36 @@ translator.loaded_models  # the models it holds right now
 translator.unload()  # free them; the next call loads what it needs again
 ```
 
+### Keep links and placeholders
+
+Machine translation models translate everything they see, including the parts that must not change. Opus-MT turns `https://example.com/reset` into `https://ejemplo.com/reset`, which is a different site. So before a text reaches the model, `Translator` swaps these literals for placeholders the models copy through, and puts them back afterwards:
+
+- URLs (`https://…`, `www.…`) and bare domains with a lowercase ending (`acme.io/help`). A sentence's full stop or an unmatched closing bracket after a URL isn't part of it.
+- Email addresses, `@mentions` and `#hashtags`.
+- Numbers, including decimals, thousands separators, times and dates (`1,299.99`, `14:30`, `12/05/2026`).
+- Inline code in backticks.
+- Template placeholders: `{name}`, `{0}`, `{{name}}`, `${name}`, `%s`, `%d` and `%(name)s`.
+- HTML and XML tags and character references (`<a href="…">`, `</b>`, `&amp;`).
+- Markdown link targets, `](https://…)`. The link text is translated.
+
+```python
+translator.translate(
+    "Hi {name}, your code is 4821. Reset it at https://acme.io/r.", "es", "en"
+)
+# 'Hola {name}, tu código es 4821. Reestablecerlo en https://acme.io/r.'
+```
+
+If the translation drops, repeats or changes a placeholder, the text is translated again in pieces. The prose between the literals is translated on its own and the literals are kept between the pieces, so they always survive, though the prose can read a little less fluently. The detailed result's `preservation` says which path was taken: `"placeholders"`, `"segments"`, or `None` when the text had no literals. Pass `preserve=False` to send texts to the model untouched.
+
+Limits:
+
+- Only the literals above are protected. Markdown emphasis (`**bold**`), lists and headings, and the text inside HTML tags, are translated like any other text, and a model may move or drop the markup around them.
+- Words can move across tags. German Opus-MT turns `Click <a>here</a> to…` into `Klicken Sie hier <a></a>, um…`. The tags are intact, but the link now wraps nothing.
+- Protected numbers keep their source format: `1,299.99` stays `1,299.99` in Spanish rather than becoming `1.299,99`.
+- This isn't a document translator. Long HTML or Markdown documents work best when you translate their text nodes yourself.
+
+[Benchmarks](benchmarks.md#literal-text) has how often each model keeps literals with and without preservation.
+
 ### Keep going past bad rows
 
 By default the first text that fails to translate raises, which suits scripts you watch. For bulk jobs pass `errors="record"`. A text that fails comes back as given with status `failed` and the error message, and the rest of the batch is still translated. Errors that apply to the whole call still raise: an invalid `batch_size`, an unknown language or an unsupported pair.

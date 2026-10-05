@@ -46,6 +46,11 @@ class Translation:
     detection_score: float | None = None
     # The model that translated the text, e.g. "OpusMTModel(Xenova/opus-mt-de-en)".
     model: str | None = None
+    # How URLs, emails, code, placeholders, tags and numbers were kept unchanged:
+    # "placeholders" (swapped out and back), "segments" (the prose between them was
+    # translated piece by piece, because placeholders didn't survive), or None when the
+    # text had none or `preserve=False`.
+    preservation: str | None = None
 
 
 class BaseModel(ABC):

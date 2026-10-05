@@ -20,6 +20,7 @@ from noentenc.languages import (
 )
 from noentenc.profiles import Profile
 from noentenc.translation import _routing
+from noentenc.translation._literals import translate_preserving
 from noentenc.translation.models.base import (
     BaseModel,
     Translation,
@@ -114,6 +115,12 @@ class Translator:
     `ModelConstraintError` before downloading anything (with `"auto"`, those texts get
     `UNSUPPORTED_SOURCE`). `plan()`, `supports()` and `supported_languages()` answer
     what a profile would do without loading or downloading a model.
+
+    Literal text is kept: URLs, email addresses, mentions, hashtags, numbers, inline
+    code, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags and Markdown
+    link targets are swapped for placeholders the models copy through, then put back. If
+    a translation loses a placeholder, the prose around the literals is translated piece
+    by piece instead, so literals always survive. `preserve=False` turns this off.
 
     Languages can be `Language` members or codes and names that `to_language` accepts,
     such as `"es"`, `"spa"`, `"es-ES"` or `"spanish"`.
@@ -280,6 +287,7 @@ class Translator:
         truncate: bool = False,
         detailed: Literal[False] = False,
         unknown_source: UnknownSourcePolicy = "keep",
+        preserve: bool = True,
     ) -> str: ...
 
     @overload
@@ -292,6 +300,7 @@ class Translator:
         truncate: bool = False,
         detailed: Literal[True],
         unknown_source: UnknownSourcePolicy = "keep",
+        preserve: bool = True,
     ) -> Translation: ...
 
     def translate(
@@ -303,6 +312,7 @@ class Translator:
         truncate: bool = False,
         detailed: bool = False,
         unknown_source: UnknownSourcePolicy = "keep",
+        preserve: bool = True,
     ) -> str | Translation:
         """Translate `text`, sentence by sentence, keeping its whitespace and line breaks.
 
@@ -313,6 +323,10 @@ class Translator:
 
         Blank text, and text whose `source_language` is `target_language`, come back
         unchanged without loading a model. `source_language="auto"` detects it.
+
+        URLs, email addresses, mentions, hashtags, numbers, inline code, template
+        placeholders and HTML tags come back byte-for-byte (see `Translation.preservation`);
+        `preserve=False` sends the text to the model as it is.
         """
         (translation,) = self._translate(
             [text],
@@ -322,6 +336,7 @@ class Translator:
             truncate,
             "raise",
             unknown_source,
+            preserve=preserve,
         )
         return translation if detailed else translation.text
 
@@ -337,6 +352,7 @@ class Translator:
         detailed: Literal[False] = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
+        preserve: bool = True,
     ) -> list[str]: ...
 
     @overload
@@ -351,6 +367,7 @@ class Translator:
         detailed: Literal[True],
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
+        preserve: bool = True,
     ) -> list[Translation]: ...
 
     def translate_batch(
@@ -364,6 +381,7 @@ class Translator:
         detailed: bool = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
+        preserve: bool = True,
     ) -> list[str] | list[Translation]:
         """Translate each of `texts`, like `translate`, in input order.
 
@@ -383,6 +401,7 @@ class Translator:
             truncate,
             errors,
             unknown_source,
+            preserve=preserve,
         )
         return translations if detailed else [t.text for t in translations]
 
@@ -403,6 +422,7 @@ class Translator:
         unknown_source: UnknownSourcePolicy = "keep",
         status_column: str | None = None,
         source_column: str | None = None,
+        preserve: bool = True,
     ) -> pl.DataFrame: ...
 
     @overload
@@ -422,6 +442,7 @@ class Translator:
         unknown_source: UnknownSourcePolicy = "keep",
         status_column: str | None = None,
         source_column: str | None = None,
+        preserve: bool = True,
     ) -> pd.DataFrame: ...
 
     def translate_dataset(
@@ -440,6 +461,7 @@ class Translator:
         unknown_source: UnknownSourcePolicy = "keep",
         status_column: str | None = None,
         source_column: str | None = None,
+        preserve: bool = True,
     ) -> pl.DataFrame | pd.DataFrame:
         """Return `dataset` with `result_column` holding the translation of `target_column`.
 
@@ -470,6 +492,7 @@ class Translator:
                 errors,
                 unknown_source,
                 progress=progress.update,
+                preserve=preserve,
             )
         results: list[str | None] = [None] * len(values)
         failures: list[str | None] = [None] * len(values)
@@ -503,6 +526,8 @@ class Translator:
         errors: ErrorPolicy,
         unknown_source: UnknownSourcePolicy,
         progress: Callable[[int], object] | None = None,
+        *,
+        preserve: bool = True,
     ) -> list[Translation]:
         """Translate `texts`, answering what needs no model before loading one."""
         check_texts(texts)
@@ -542,6 +567,7 @@ class Translator:
                     batch_size,
                     truncate,
                     errors,
+                    preserve,
                 )
                 for i, translation in zip(indices, translated, strict=True):
                     results[i] = replace(
@@ -564,13 +590,17 @@ class Translator:
         batch_size: int,
         truncate: bool,
         errors: ErrorPolicy,
+        preserve: bool,
     ) -> list[Translation]:
         def run(batch: list[str]) -> list[Translation]:
             return model.predict_batch_detailed(
                 batch, target, source, batch_size, truncate=truncate
             )
 
-        return run(texts) if errors == "raise" else _record_failures(texts, run)
+        def translate(batch: list[str]) -> list[Translation]:
+            return run(batch) if errors == "raise" else _record_failures(batch, run)
+
+        return translate_preserving(texts, translate) if preserve else translate(texts)
 
     def _auto_groups(
         self,

@@ -1,0 +1,34 @@
+{
+  "en": [
+    "Visit https://example.com/reset?id=42 or email support@acme.io for help.",
+    "Hi {name}, your code is 4821 and it expires at 14:30 on 12/05/2026.",
+    "Run `pip install noentenc` and ping @marti in #support.",
+    "Read [the guide](https://docs.acme.io/start). It takes 5 minutes.",
+    "Click <a href=\"https://acme.io/help\">here</a> to open a ticket.",
+    "Dear %s, your invoice for ${amount} is ready at acme.io/billing.",
+    "Your order #1042 costs 1,299.99 EUR and ships on 03/11/2026.",
+    "Error 504: the request to https://api.acme.io/v2/orders timed out after 30 seconds.",
+    "Please reply to {{agent_email}} before {{deadline}}.",
+    "This is <b>very</b> important: back up /etc/acme.conf first.",
+    "Thanks @ana! The fix is in https://github.com/acme/app/pull/77.",
+    "Call +34 600 123 456 or write to billing@acme.io and quote ticket #5531.",
+    "Use %(count)d credits from https://acme.io/credits?plan=pro&ref=mail.",
+    "Your password reset link is https://acme.io/r/AbC123 and it works once.",
+    "Set `MAX_RETRIES=5` in config.yaml, then restart the service.",
+    "We moved: the new docs live at docs.acme.io and the old ones at wiki.acme.io."
+  ],
+  "es": [
+    "Visita https://example.com/reset?id=42 o escribe a soporte@acme.io.",
+    "Hola {nombre}, tu código es 4821 y caduca a las 14:30 del 12/05/2026.",
+    "Tu pedido #1042 cuesta 1.299,99 EUR.",
+    "Haz clic <a href=\"https://acme.io/ayuda\">aquí</a> para abrir una incidencia.",
+    "Consulta la guía en docs.acme.io y avisa a @ana en #soporte.",
+    "Ejecuta `npm ci` y vuelve a intentarlo en 5 minutos."
+  ],
+  "de": [
+    "Besuchen Sie https://example.com/reset?id=42 oder schreiben Sie an hilfe@acme.io.",
+    "Hallo {name}, Ihr Code lautet 4821 und läuft am 12.05.2026 um 14:30 ab.",
+    "Ihre Bestellung #1042 kostet 1.299,99 EUR.",
+    "Klicken Sie <a href=\"https://acme.io/hilfe\">hier</a>, um ein Ticket zu öffnen."
+  ]
+}

@@ -115,6 +115,18 @@ Text of any length works. It is split into sentences, they are translated in one
 
 `Translator` keeps the models it loads for later calls, at most two at a time by default. A loaded model needs a lot more RAM than its download: about 1.1 GB for an Opus-MT pair at q4 and 1.15 GB for SMaLL-100. Pass `max_loaded_models=` to change the limit (`None` for no limit), and call `translator.unload()` to free them all. See [memory](docs/benchmarks.md#memory).
 
+Links, emails and placeholders survive. URLs, email addresses, mentions, hashtags, numbers, inline code, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags and Markdown link targets come back byte-for-byte while the prose around them is translated:
+
+```python
+translator.translate(
+    "Visit https://example.com/reset?id=42 or email support@acme.io", "es", "en"
+)
+# 'Visite https://example.com/reset?id=42 o envíe un correo electrónico a support@acme.io'
+# Without it (preserve=False), Opus-MT writes https://ejemplo.com/reset?id=42: another site.
+```
+
+See [Keep links and placeholders](docs/quickstart.md#keep-links-and-placeholders) for what is covered and its limits.
+
 For bulk jobs, `errors="record"` keeps going past a text that fails. That text comes back as given, with its status and error in the detailed result (or in an `error_column` for `translate_dataset`), and the rest are still translated. Empty batches, blank texts and same-language requests return without loading a model.
 
 ## Trade speed for quality
@@ -181,6 +193,7 @@ Each plan reports the model's licence, download size, RAM (measured, or estimate
 | [translate_long_text.py](docs/examples/translate_long_text.py) | Translate emails and documents, and choose between an error and `truncate=True` for over-long sentences. |
 | [manage_memory.py](docs/examples/manage_memory.py) | Bound how many translation models stay loaded, and free them with `unload()`. |
 | [plan_and_limit.py](docs/examples/plan_and_limit.py) | See what a profile would download and what it costs, and restrict it by licence and download size. |
+| [preserve_literals.py](docs/examples/preserve_literals.py) | Translate messages without breaking their links, emails, code, tags and placeholders. |
 | [translate_bulk.py](docs/examples/translate_bulk.py) | Run bulk jobs with `errors="record"` so one bad row doesn't stop them, and skip model loads for empty, blank and same-language input. |
 | [choose_profile.py](docs/examples/choose_profile.py) | Trade latency for quality with the `speed`, `balance` and `quality` profiles. |
 | [custom_models.py](docs/examples/custom_models.py) | Plug your own detector and translator into the same API. |

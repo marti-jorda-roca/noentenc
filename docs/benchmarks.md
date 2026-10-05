@@ -192,6 +192,19 @@ With one sentence per call, the time is almost all loading: a limit reloads the 
 
 These are macOS figures. macOS compresses memory that isn't being used, which lowers resident memory for idle models, so expect higher numbers without a limit on Linux. To reproduce, run `uv run --with psutil python scripts/measure_memory.py models` and `... workload`.
 
+### Literal text
+
+`scripts/evaluate_literals.py` translates 26 support-style messages full of URLs, emails, code, placeholders, tags and numbers (16 English ones into Spanish and German, 6 Spanish and 4 German ones into English), with and without `preserve`. **Kept** is the share of texts whose literals all came back byte-for-byte. **Placeholders** and **Pieces** say how often preservation took each path.
+
+| Model | Texts | Kept, `preserve=False` | Kept | Placeholders | Pieces |
+|---|---:|---:|---:|---:|---:|
+| Opus-MT | 42 | 50% | **100%** | 98% | 2% |
+| SMaLL-100 | 42 | 50% | **100%** | 93% | 7% |
+| NLLB-200 600M int8 | 42 | 38% | **100%** | 93% | 7% |
+| M2M100 418M int8 | 42 | 48% | **100%** | 95% | 5% |
+
+Without preservation, half the messages lose a literal. The models translate URL domains (`example.com` → `ejemplo.com`), reformat numbers and dates, rename placeholders and break Markdown links. With it, every literal survives. The placeholders stand for `ZXQ0`, `ZXQ1`…, which an earlier test found the models copy more reliably than `{0}`, `__0__`, `<x0>` or numbers: intact in all 59 Opus-MT and SMaLL-100 translations and 41 of 44 NLLB-200 and M2M100 ones. The few texts where a placeholder doesn't survive, typically one standing for a number before a unit, go through the piece-by-piece path.
+
 ## Profiles
 
 `LanguageDetector(profile)` and `Translator(profile)` pick models from the measurements below. Accuracy comes from the [FLORES-200](https://github.com/facebookresearch/flores/tree/main/flores200) devtest set, which has the same 1,012 sentences in 204 language variants.
