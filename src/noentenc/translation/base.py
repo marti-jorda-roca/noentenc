@@ -9,25 +9,20 @@ from tqdm import tqdm
 
 from noentenc._batching import check_batch_size, check_texts, is_blank
 from noentenc._dataframe import column_values, with_column
-from noentenc.languages import Language, UnsupportedLanguageError
+from noentenc.languages import Language
 from noentenc.profiles import Profile
-from noentenc.translation.models._seq2seq import Precision, Seq2SeqModel
+from noentenc.translation import _routing
 from noentenc.translation.models.base import (
     BaseModel,
     Translation,
     TranslationStatus,
 )
-from noentenc.translation.models.nllb import NLLBModel
-from noentenc.translation.models.opus_mt import OPUS_MT_PAIRS, OpusMTModel
-from noentenc.translation.models.small100 import SMaLL100Model
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pandas as pd
     import polars as pl
-
-# What a candidate returns for a language pair: the cache key and loader of the model
-# it would use, or None when that model can't translate the pair.
-_Pick = tuple[Hashable, Callable[[], BaseModel]] | None
 
 # What to do when translating a text raises: raise it, or record it in the result.
 ErrorPolicy = Literal["raise", "record"]
@@ -35,46 +30,6 @@ ErrorPolicy = Literal["raise", "record"]
 # Models a profile-based `Translator` keeps loaded at once. Two cover a pair model plus the
 # SMaLL-100 fallback; see docs/benchmarks.md#memory for the RAM each model takes.
 DEFAULT_MAX_LOADED_MODELS = 2
-
-
-def _opus_mt(source: Language | None, target: Language) -> _Pick:
-    if source is None or (source, target) not in OPUS_MT_PAIRS:
-        return None
-    return (source, target), lambda: OpusMTModel.from_pair(source, target)
-
-
-def _small100(source: Language | None, target: Language) -> _Pick:
-    return _multilingual(SMaLL100Model, source, target)
-
-
-def _nllb_int8(source: Language | None, target: Language) -> _Pick:
-    # Explicit, so changing the model's default precision doesn't change the profile.
-    return _multilingual(NLLBModel, source, target, Precision.INT8)
-
-
-def _nllb_fp32(source: Language | None, target: Language) -> _Pick:
-    return _multilingual(NLLBModel, source, target, Precision.FP32)
-
-
-def _multilingual(
-    model: type[Seq2SeqModel],
-    source: Language | None,
-    target: Language,
-    precision: Precision | None = None,
-) -> _Pick:
-    if not model.schema.supports(source, target):
-        return None
-    return (model, precision), lambda: model(precision=precision)
-
-
-# Models tried in order for each profile; the first that translates the pair is used.
-# Where Opus-MT has a model it scores as well as NLLB-200 on average and is ~8x faster
-# (FLORES-200 chrF++, docs/benchmarks.md), so every profile tries it first.
-_CANDIDATES: dict[Profile, tuple[Callable[[Language | None, Language], _Pick], ...]] = {
-    Profile.SPEED: (_opus_mt, _small100),
-    Profile.BALANCE: (_opus_mt, _nllb_int8, _small100),
-    Profile.QUALITY: (_opus_mt, _nllb_fp32, _small100),
-}
 
 
 class Translator:
@@ -98,6 +53,11 @@ class Translator:
     later call needs it. A higher limit saves reloads when calls alternate between many
     pairs, at 0.6 to 1.2 GB of RAM per Opus-MT or SMaLL-100 model (docs/benchmarks.md).
     `unload()` drops them all.
+
+    A profile downloads models into `cache_dir` (see `noentenc._cache` for the default),
+    or with `only_local_files` only reads them from there, failing at once when a model
+    is missing. `noentenc.prepare` downloads them ahead of time. For a `model` you pass,
+    give these options to the model instead.
     """
 
     def __init__(
@@ -105,13 +65,22 @@ class Translator:
         model: BaseModel | Profile | str | None = None,
         *,
         max_loaded_models: int | None = DEFAULT_MAX_LOADED_MODELS,
+        only_local_files: bool = False,
+        cache_dir: str | Path | None = None,
     ) -> None:
         if isinstance(model, BaseModel):
+            if only_local_files or cache_dir is not None:
+                raise ValueError(
+                    "only_local_files and cache_dir apply to the models a profile "
+                    "loads; pass them to your model instead"
+                )
             self.model: BaseModel | None = model
             self.profile = Profile.SPEED  # unused: `model` translates every pair
         else:
             self.model = None
             self.profile = Profile(model or Profile.SPEED)
+        self.only_local_files = only_local_files
+        self.cache_dir = cache_dir
         self.max_loaded_models = _check_max_loaded_models(max_loaded_models)
         # Loaded profile models, least recently used first.
         self._default_models: OrderedDict[Hashable, BaseModel] = OrderedDict()
@@ -356,14 +325,12 @@ class Translator:
             # `errors="record"` keeps per-text failures.
             self.model.schema.validate(source, target, type(self.model).__name__)
             return self.model
-        for candidate in _CANDIDATES[self.profile]:
-            picked = candidate(source, target)
-            if picked is None:
-                continue
-            return self._cached(*picked)
-        pair = f"into {target}" if source is None else f"{source}->{target}"
-        raise UnsupportedLanguageError(
-            f"No {self.profile} model translates {pair}; pass a model explicitly"
+        choice = _routing.choose(self.profile, source, target)
+        return self._cached(
+            choice,
+            lambda: choice.build(
+                only_local_files=self.only_local_files, cache_dir=self.cache_dir
+            ),
         )
 
     def _cached(self, key: Hashable, load: Callable[[], BaseModel]) -> BaseModel:

@@ -13,21 +13,27 @@ from noentenc.profiles import Profile
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from pathlib import Path
 
     import pandas as pd
     import polars as pl
 
+    from noentenc.language_detection._download import RemoteFile
+
 DEFAULT_TOP_K = 5
 
 
-def _profile_model(profile: Profile) -> BaseModel:
-    match profile:
-        case Profile.SPEED:
-            return FastTextModel()
-        case Profile.BALANCE:
-            return FastTextModel("openlid-v3")
-        case Profile.QUALITY:
-            return FastTextModel("glotlid")
+# The fastText preset each profile uses.
+PROFILE_PRESETS: dict[Profile, str] = {
+    Profile.SPEED: "lid176",
+    Profile.BALANCE: "openlid-v3",
+    Profile.QUALITY: "glotlid",
+}
+
+
+def profile_remote_files(profile: Profile | str) -> list[RemoteFile]:
+    """The files `LanguageDetector(profile)` downloads."""
+    return FastTextModel.remote_files(PROFILE_PRESETS[Profile(profile)])
 
 
 class LanguageDetector:
@@ -60,6 +66,11 @@ class LanguageDetector:
     a backend that scores every language; CLD3 and heliport don't.
 
     ``detailed=True`` returns a ``Detection`` with the status that explains the label.
+
+    A profile downloads its model into ``cache_dir`` (see ``noentenc._cache`` for the
+    default), or with ``only_local_files`` only reads it from there, failing at once when
+    it is missing. ``noentenc.prepare`` downloads it ahead of time. For a ``model`` you
+    pass, give these options to the model instead.
     """
 
     def __init__(
@@ -70,9 +81,21 @@ class LanguageDetector:
         min_margin: float | None = None,
         min_letters: int | None = None,
         candidates: Iterable[str] | None = None,
+        only_local_files: bool = False,
+        cache_dir: str | Path | None = None,
     ) -> None:
-        if not isinstance(model, BaseModel):
-            model = _profile_model(Profile(model or Profile.SPEED))
+        if isinstance(model, BaseModel):
+            if only_local_files or cache_dir is not None:
+                raise ValueError(
+                    "only_local_files and cache_dir apply to the model a profile "
+                    "loads; pass them to your model instead"
+                )
+        else:
+            model = FastTextModel(
+                PROFILE_PRESETS[Profile(model or Profile.SPEED)],
+                only_local_files,
+                cache_dir=cache_dir,
+            )
         self.model = model
         self.policy = Policy(
             model,

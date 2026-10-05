@@ -290,16 +290,33 @@ Null cells get `und` from the detector and stay null in the translation. Both sh
 
 ## Run offline
 
-Every model takes `only_local_files=True`. With it, a model that isn't in the cache raises an error instead of downloading. Run your code once with network access to fill the cache, then deploy with the flag set.
+Inference never touches the network. Only downloading weights does, and that happens the first time a model is used. To deploy somewhere without network access, download the weights ahead of time with `prepare`, then point the same classes at them with `only_local_files=True`.
 
 ```python
-LanguageDetector(FastTextModel(only_local_files=True))
-Translator(
-    OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH, only_local_files=True)
+import noentenc
+from noentenc import Language
+from noentenc.language_detection import LanguageDetector
+from noentenc.translation import Translator
+
+# On a machine with network access, e.g. while building the image:
+noentenc.prepare(
+    "speed",
+    translation=[(Language.ENGLISH, Language.SPANISH), (None, Language.ENGLISH)],
+    cache_dir="/models",
 )
+
+# In the deployment, with /models mounted or copied:
+detector = LanguageDetector(only_local_files=True, cache_dir="/models")
+translator = Translator(only_local_files=True, cache_dir="/models")
 ```
 
-Detection weights live in `~/.cache/noentenc`, or wherever `NOENTENC_CACHE` points. Translation weights live in the Hugging Face cache.
+`prepare` downloads the profile's detection model (`detection=False` skips it) and, for each `(source, target)` pair, the model that profile's `Translator` would pick. A `None` source is translation without a source language. It doesn't load any of them. With `only_local_files=True`, a model that isn't there raises `FileNotFoundError` straight away, and the message says what to prepare. Models you build yourself take the same `only_local_files` and `cache_dir` arguments.
+
+One directory holds both kinds of weights. The cache root is the `cache_dir` you pass, else `NOENTENC_CACHE`, else `~/.cache/noentenc`. Detection weights go directly under it and translation weights under `<root>/hub`, in the Hugging Face cache layout. If you set neither `cache_dir` nor `NOENTENC_CACHE`, translation weights stay in the Hugging Face cache (`HF_HUB_CACHE` or `HF_HOME`), as in earlier releases, so models you already downloaded are reused. If you start setting `NOENTENC_CACHE`, translation models download once more into the new location.
+
+Downloads show a progress bar (`TQDM_DISABLE=1` hides it). Detection downloads give up on a connection that stays silent for 30 seconds (`NOENTENC_DOWNLOAD_TIMEOUT` changes it), retry up to 4 times on timeouts, dropped connections and server errors, and resume where they stopped. Translation downloads use huggingface-hub, which has its own retries and its own `HF_HUB_DOWNLOAD_TIMEOUT`.
+
+If a file gets corrupted, run `prepare` again: it checks the checksummed detection files and downloads any that don't match. `prepare(..., force=True)` downloads everything again, translation models included. Deleting the file and running `prepare` works too.
 
 ## Next steps
 

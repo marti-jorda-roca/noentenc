@@ -51,7 +51,7 @@ With pip, the same extras work: `pip install 'noentenc[translation]'`.
 
 Python 3.10 isn't supported: onnxruntime 1.30, pandas 3 and the current numpy releases have no Python 3.10 wheels.
 
-Weights download on first use to `~/.cache/noentenc` (detection) and the Hugging Face cache (translation). Nothing is bundled in the wheel.
+Weights download on first use, to `~/.cache/noentenc` for detection and the Hugging Face cache for translation. Nothing is bundled in the wheel. To run offline, download them ahead of time with `noentenc.prepare(...)` and pass `only_local_files=True`; see [Run offline](docs/quickstart.md#run-offline).
 
 ## Detect a language
 
@@ -141,6 +141,7 @@ On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 
 | [translate_to_english.py](docs/examples/translate_to_english.py) | Detect each message's language, then batch-translate everything into English. |
 | [choose_detection_backend.py](docs/examples/choose_detection_backend.py) | Swap backends, restrict candidate languages, collapse macrolanguages. |
 | [choose_translation_model.py](docs/examples/choose_translation_model.py) | Pick a model, precision and thread count, and run offline. |
+| [prepare_offline.py](docs/examples/prepare_offline.py) | Download a profile's weights into one directory, then detect and translate without network access. |
 | [translate_long_text.py](docs/examples/translate_long_text.py) | Translate emails and documents, and choose between an error and `truncate=True` for over-long sentences. |
 | [manage_memory.py](docs/examples/manage_memory.py) | Bound how many translation models stay loaded, and free them with `unload()`. |
 | [translate_bulk.py](docs/examples/translate_bulk.py) | Run bulk jobs with `errors="record"` so one bad row doesn't stop them, and skip model loads for empty, blank and same-language input. |
@@ -195,7 +196,7 @@ Every translation model takes `precision=` (`fp32`, `int8`, `q4`, where the expo
 
 ### Weights and licences
 
-Weights are pinned to a revision and, where we download them ourselves, checked against a sha256. Set `NOENTENC_CACHE` to change the detection cache location. With `only_local_files=True`, a model that isn't cached raises instead of downloading, which is what you want on an air-gapped server.
+Weights are pinned to a revision and, where we download them ourselves, checked against a sha256. `cache_dir=` or `NOENTENC_CACHE` sets one directory for detection and translation weights. `noentenc.prepare(profile, translation=[(source, target), ...])` downloads a profile's models without loading them. With `only_local_files=True` on `LanguageDetector`, `Translator` or any model, a model that isn't cached raises at once instead of downloading, which is what you want on an air-gapped server.
 
 The weights' licences apply to your use of the weights. They don't affect this package's licence.
 

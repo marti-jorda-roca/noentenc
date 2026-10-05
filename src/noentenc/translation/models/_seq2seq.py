@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from noentenc._batching import check_batch_size
+from noentenc._cache import translation_cache
 from noentenc._onnx import pad
 from noentenc._optional import TRANSLATION_EXTRA, require
 from noentenc.languages import Language
@@ -55,6 +56,9 @@ class Seq2SeqModel(BaseModel):
 
     Subclasses describe where their files live and how language tokens frame the
     input; the decoding itself is done by `Seq2SeqOnnxEngine`.
+
+    Hugging Face repos download into `<cache_dir>/hub`; without `cache_dir`, into
+    `$NOENTENC_CACHE/hub` if that is set, else the Hugging Face cache.
     """
 
     default_model: ClassVar[str]
@@ -73,6 +77,7 @@ class Seq2SeqModel(BaseModel):
         revision: str | None = None,
         precision: Precision | str | None = None,
         num_threads: int | None = None,
+        cache_dir: str | Path | None = None,
     ) -> None:
         # Checked before downloading weights that couldn't be run.
         for module in ("tokenizers", "onnxruntime"):
@@ -80,18 +85,14 @@ class Seq2SeqModel(BaseModel):
         if model is None:
             model, revision = self.default_model, self.default_revision
         super().__init__(model, only_local_files)
-        self.precision = Precision(precision or self.default_precision)
-        if self.precision not in self.onnx_files:
-            raise ValueError(
-                f"{type(self).__name__} has no {self.precision} weights; "
-                f"available: {[str(p) for p in self.onnx_files]}"
-            )
+        self.precision = self._check_precision(precision)
         encoder, decoder = self.onnx_files[self.precision]
         files = resolve_files(
             self.model,
-            ["config.json", "tokenizer.json", encoder, decoder, *self.extra_files],
+            self.filenames(self.precision),
             only_local_files,
             revision=revision,
+            cache_dir=translation_cache(cache_dir),
         )
         self.config = json.loads(files["config.json"].read_text())
         self.tokenizer = self._load_tokenizer(files)
@@ -109,6 +110,48 @@ class Seq2SeqModel(BaseModel):
             DecoderShape.from_config(self.config),
             num_threads,
         )
+
+    @classmethod
+    def filenames(cls, precision: Precision | str | None = None) -> list[str]:
+        """The files a model of this class loads at `precision` (`None`: the default)."""
+        encoder, decoder = cls.onnx_files[cls._check_precision(precision)]
+        return ["config.json", "tokenizer.json", encoder, decoder, *cls.extra_files]
+
+    @classmethod
+    def download(
+        cls,
+        model: str | None = None,
+        *,
+        revision: str | None = None,
+        precision: Precision | str | None = None,
+        cache_dir: str | Path | None = None,
+        force: bool = False,
+    ) -> dict[str, Path]:
+        """Download a model's files without loading it; return their local paths.
+
+        Takes the same `model`, `revision`, `precision` and `cache_dir` as the
+        constructor, which then loads the files offline with `only_local_files=True`.
+        `force` downloads them again, e.g. to replace a corrupt file.
+        """
+        if model is None:
+            model, revision = cls.default_model, cls.default_revision
+        return resolve_files(
+            model,
+            cls.filenames(precision),
+            revision=revision,
+            cache_dir=translation_cache(cache_dir),
+            force=force,
+        )
+
+    @classmethod
+    def _check_precision(cls, precision: Precision | str | None) -> Precision:
+        checked = Precision(precision or cls.default_precision)
+        if checked not in cls.onnx_files:
+            raise ValueError(
+                f"{cls.__name__} has no {checked} weights; "
+                f"available: {[str(p) for p in cls.onnx_files]}"
+            )
+        return checked
 
     def predict_batch(
         self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import weakref
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pandas as pd
 import polars as pl
@@ -15,7 +16,7 @@ from noentenc.languages import (
     UnsupportedLanguageError,
 )
 from noentenc.profiles import Profile
-from noentenc.translation import base as translator_module
+from noentenc.translation import _routing as routing_module
 from noentenc.translation.base import Translator
 from noentenc.translation.models.base import (
     BaseModel,
@@ -122,41 +123,91 @@ def test_truncate_reaches_the_model() -> None:
     assert out["out"].to_list() == ["A:en"]
 
 
-class FakeOpus(UpperModel):
-    created: list[tuple[Language, Language]] = []
+class FakeSeq2Seq(UpperModel):
+    """Stands in for a `Seq2SeqModel` class in profile routing; records every load."""
+
+    loads: list[dict[str, object]] = []
+
+    def __init__(
+        self,
+        model: str | None = None,
+        only_local_files: bool = False,
+        *,
+        revision: str | None = None,
+        precision: str | None = None,
+        cache_dir: object = None,
+    ) -> None:
+        FakeSeq2Seq.loads.append(
+            {
+                "class": type(self).__name__,
+                "model": model,
+                "only_local_files": only_local_files,
+                "cache_dir": cache_dir,
+            }
+        )
+        super().__init__()
 
     @classmethod
-    def from_pair(cls, source: Language, target: Language) -> FakeOpus:
-        cls.created.append((source, target))
-        return cls()
+    def download(
+        cls,
+        model: str | None = None,
+        *,
+        revision: str | None = None,
+        precision: str | None = None,
+        cache_dir: object = None,
+        force: bool = False,
+    ) -> dict[str, Path]:
+        FakeSeq2Seq.loads.append(
+            {"class": cls.__name__, "download": model, "cache_dir": cache_dir}
+        )
+        return {"config.json": Path(f"/cache/{model}/config.json")}
 
 
-class FakeSmall100(UpperModel):
+class FakeOpus(FakeSeq2Seq):
+    created: list[tuple[Language, Language]] = []
+
+    def __init__(
+        self, model: str | None = None, *args: object, **kwargs: object
+    ) -> None:
+        assert model is not None
+        source, target = model.rsplit("opus-mt-", 1)[1].split("-")
+        FakeOpus.created.append((Language(source), Language(target)))
+        super().__init__(model, *args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+
+class FakeSmall100(FakeSeq2Seq):
     schema = SMaLL100Model.schema
+    default_model = SMaLL100Model.default_model
+    default_revision = SMaLL100Model.default_revision
     created = 0
 
-    def __init__(self, precision: str | None = None) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
         FakeSmall100.created += 1
-        super().__init__()
+        super().__init__(*args, **kwargs)  # ty: ignore[invalid-argument-type]
 
 
-class FakeNLLB(UpperModel):
+class FakeNLLB(FakeSeq2Seq):
     schema = NLLBModel.schema
+    default_model = NLLBModel.default_model
+    default_revision = NLLBModel.default_revision
     created: list[str | None] = []
 
-    def __init__(self, precision: str | None = None) -> None:
+    def __init__(
+        self, *args: object, precision: str | None = None, **kwargs: object
+    ) -> None:
         FakeNLLB.created.append(precision)
-        super().__init__()
+        super().__init__(*args, precision=precision, **kwargs)  # ty: ignore[invalid-argument-type]
 
 
 @pytest.fixture
 def fake_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeSeq2Seq.loads = []
     FakeOpus.created = []
     FakeSmall100.created = 0
     FakeNLLB.created = []
-    monkeypatch.setattr(translator_module, "OpusMTModel", FakeOpus)
-    monkeypatch.setattr(translator_module, "SMaLL100Model", FakeSmall100)
-    monkeypatch.setattr(translator_module, "NLLBModel", FakeNLLB)
+    monkeypatch.setattr(routing_module, "OpusMTModel", FakeOpus)
+    monkeypatch.setattr(routing_module, "SMaLL100Model", FakeSmall100)
+    monkeypatch.setattr(routing_module, "NLLBModel", FakeNLLB)
 
 
 @pytest.fixture
@@ -444,14 +495,10 @@ def test_invalid_max_loaded_models(value: object, error: type[Exception]) -> Non
         Translator(max_loaded_models=value)  # ty: ignore[invalid-argument-type]
 
 
-class UnloadingOpus(UpperModel):
+class UnloadingOpus(FakeSeq2Seq):
     """Unloads its translator in the middle of translating, like a concurrent eviction."""
 
     translator: Translator
-
-    @classmethod
-    def from_pair(cls, source: Language, target: Language) -> UnloadingOpus:
-        return cls()
 
     def predict_batch(
         self,
@@ -467,7 +514,7 @@ class UnloadingOpus(UpperModel):
 def test_eviction_does_not_break_a_call_in_flight(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(translator_module, "OpusMTModel", UnloadingOpus)
+    monkeypatch.setattr(routing_module, "OpusMTModel", UnloadingOpus)
     translator = UnloadingOpus.translator = Translator(max_loaded_models=1)
     assert translator.translate_batch(["a", "b"], ES, EN) == ["A:es", "B:es"]
     assert translator.loaded_models == []

@@ -82,6 +82,8 @@ class OnnxClassifierModel(BaseModel):
         collapse_macrolanguages: bool = False,
         max_length: int | None = None,
         num_threads: int | None = None,
+        *,
+        cache_dir: str | Path | None = None,
     ) -> None:
         super().__init__(
             model, only_local_files, normalize_labels, collapse_macrolanguages
@@ -89,7 +91,9 @@ class OnnxClassifierModel(BaseModel):
         # Checked before downloading weights that couldn't be run.
         tokenizers = require("tokenizers", ONNX_EXTRA)
         require("onnxruntime", ONNX_EXTRA)
-        onnx_path, tokenizer_path, config_path = self._resolve(model, only_local_files)
+        onnx_path, tokenizer_path, config_path = self._resolve(
+            model, only_local_files, cache_dir
+        )
         if max_length is None:
             preset = PRESETS.get(model) if isinstance(model, str) else None
             max_length = preset.max_length if preset else DEFAULT_MAX_LENGTH
@@ -108,19 +112,29 @@ class OnnxClassifierModel(BaseModel):
         self._input_names = {inp.name for inp in self._session.get_inputs()}
 
     @staticmethod
-    def _resolve(model: str | Path, only_local_files: bool) -> tuple[Path, Path, Path]:
-        if isinstance(model, str) and model in PRESETS:
-            preset = PRESETS[model]
-            return (
-                fetch(
-                    preset.remote(preset.onnx_file, preset.onnx_sha256),
-                    only_local_files=only_local_files,
-                ),
-                fetch(
-                    preset.remote("tokenizer.json"), only_local_files=only_local_files
-                ),
-                fetch(preset.remote("config.json"), only_local_files=only_local_files),
+    def remote_files(preset: str) -> list[RemoteFile]:
+        """The files a preset downloads: the ONNX graph, tokenizer and config."""
+        if preset not in PRESETS:
+            raise ValueError(
+                f"unknown ONNX preset {preset!r}; presets: {', '.join(PRESETS)}"
             )
+        spec = PRESETS[preset]
+        return [
+            spec.remote(spec.onnx_file, spec.onnx_sha256),
+            spec.remote("tokenizer.json"),
+            spec.remote("config.json"),
+        ]
+
+    @staticmethod
+    def _resolve(
+        model: str | Path, only_local_files: bool, cache_dir: str | Path | None
+    ) -> tuple[Path, Path, Path]:
+        if isinstance(model, str) and model in PRESETS:
+            onnx, tokenizer, config = (
+                fetch(remote, only_local_files=only_local_files, cache_dir=cache_dir)
+                for remote in OnnxClassifierModel.remote_files(model)
+            )
+            return onnx, tokenizer, config
         root = Path(model)
         if not root.is_dir():
             raise FileNotFoundError(
