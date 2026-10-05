@@ -1,5 +1,7 @@
 """Minimal cached downloader for model weights (no ``huggingface_hub`` dependency)."""
 
+from __future__ import annotations
+
 import hashlib
 import os
 import tempfile

@@ -1,13 +1,14 @@
+from __future__ import annotations
+
 import json
 from dataclasses import replace
 from enum import StrEnum
 from pathlib import Path
-from typing import ClassVar
-
-from tokenizers import Tokenizer
+from typing import TYPE_CHECKING, ClassVar
 
 from noentenc._batching import check_batch_size
 from noentenc._onnx import pad
+from noentenc._optional import TRANSLATION_EXTRA, require
 from noentenc.languages import Language
 from noentenc.translation._segment import split_sentences
 from noentenc.translation.models._engine import (
@@ -21,6 +22,9 @@ from noentenc.translation.models.base import (
     InputTooLongError,
     Translation,
 )
+
+if TYPE_CHECKING:
+    from tokenizers import Tokenizer
 
 _PREVIEW_LENGTH = 60
 
@@ -70,6 +74,9 @@ class Seq2SeqModel(BaseModel):
         precision: Precision | str | None = None,
         num_threads: int | None = None,
     ) -> None:
+        # Checked before downloading weights that couldn't be run.
+        for module in ("tokenizers", "onnxruntime"):
+            require(module, TRANSLATION_EXTRA)
         if model is None:
             model, revision = self.default_model, self.default_revision
         super().__init__(model, only_local_files)
@@ -206,7 +213,7 @@ class Seq2SeqModel(BaseModel):
         return [text.strip() for text in decoded], truncated, exhausted
 
     def _load_tokenizer(self, files: dict[str, Path]) -> Tokenizer:
-        return Tokenizer.from_file(str(files["tokenizer.json"]))
+        return tokenizer_class().from_file(str(files["tokenizer.json"]))
 
     def _token_id(self, token: str) -> int:
         token_id = self.tokenizer.token_to_id(token)
@@ -225,6 +232,11 @@ class Seq2SeqModel(BaseModel):
 
     def _banned_ids(self) -> tuple[int, ...]:
         return ()
+
+
+def tokenizer_class() -> type[Tokenizer]:
+    """`tokenizers.Tokenizer`, imported on first use (it comes with the translation extra)."""
+    return require("tokenizers", TRANSLATION_EXTRA).Tokenizer
 
 
 def _preview(text: str) -> str:

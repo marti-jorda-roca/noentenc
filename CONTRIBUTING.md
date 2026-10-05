@@ -6,7 +6,7 @@ For security issues, follow [SECURITY.md](SECURITY.md).
 
 ## Development
 
-Use Python 3.14 or newer and [uv](https://docs.astral.sh/uv/). Fork the repository, clone your fork, and create a branch for your change.
+Use Python 3.14 for development (the package supports 3.11 and newer) and [uv](https://docs.astral.sh/uv/). Fork the repository, clone your fork, and create a branch for your change.
 
 ```bash
 uv sync --locked --all-extras --group dev
@@ -17,6 +17,8 @@ uv run coverage run -m pytest tests/unit --strict-config --strict-markers -v --t
 ```
 
 The `heliport` extra is unavailable on Windows. Dependency markers skip it there.
+
+CI runs the unit tests on Linux, macOS and Windows with every supported Python version, and runs the quickstart from the built wheel in a clean environment. To try another version locally, run `uv run --python 3.11 --isolated --all-extras --group dev pytest tests/unit`. `scripts/smoke_quickstart.py` has the commands for the wheel check.
 
 Install [Trivy](https://trivy.dev/docs/latest/getting-started/installation/) to run the security check:
 

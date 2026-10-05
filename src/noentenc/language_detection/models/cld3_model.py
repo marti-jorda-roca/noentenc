@@ -1,6 +1,6 @@
 """Google CLD3 backend: a tiny feed-forward network over character n-grams (107 languages)."""
 
-from noentenc.language_detection._optional import require
+from noentenc._optional import require
 from noentenc.language_detection.labels import UNDETERMINED
 from noentenc.language_detection.models.base import BaseModel
 

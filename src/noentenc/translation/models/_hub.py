@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from huggingface_hub import hf_hub_download
+from noentenc._optional import TRANSLATION_EXTRA, require
 
 
 def resolve_files(
@@ -22,9 +22,10 @@ def resolve_files(
         if missing:
             raise FileNotFoundError(f"{local_dir} is missing {missing}")
         return paths
+    hub = require("huggingface_hub", TRANSLATION_EXTRA)
     return {
         name: Path(
-            hf_hub_download(
+            hub.hf_hub_download(
                 str(model),
                 name,
                 revision=revision,

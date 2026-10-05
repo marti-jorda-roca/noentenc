@@ -1,17 +1,31 @@
-from pathlib import Path
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
-import onnxruntime as ort
+
+from noentenc._optional import ONNX_EXTRA, require
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    import onnxruntime as ort
 
 
-def create_session(path: Path, num_threads: int | None) -> ort.InferenceSession:
-    options = ort.SessionOptions()
-    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+def create_session(
+    path: Path, num_threads: int | None, extra: str = ONNX_EXTRA
+) -> ort.InferenceSession:
+    """An onnxruntime CPU session; `extra` names the install extra if onnxruntime is missing."""
+    runtime = require("onnxruntime", extra)
+    options = runtime.SessionOptions()
+    options.graph_optimization_level = runtime.GraphOptimizationLevel.ORT_ENABLE_ALL
+    options.execution_mode = runtime.ExecutionMode.ORT_SEQUENTIAL
     options.inter_op_num_threads = 1
     if num_threads is not None:
         options.intra_op_num_threads = num_threads
-    return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
+    return runtime.InferenceSession(
+        str(path), options, providers=["CPUExecutionProvider"]
+    )
 
 
 def pad(sequences: list[list[int]], pad_id: int) -> tuple[np.ndarray, np.ndarray]:

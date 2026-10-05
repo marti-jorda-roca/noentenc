@@ -1,13 +1,21 @@
+from __future__ import annotations
+
 import base64
 import json
-from collections.abc import Iterator
 from pathlib import Path
-from typing import ClassVar
-
-from tokenizers import Tokenizer
+from typing import TYPE_CHECKING, ClassVar
 
 from noentenc.languages import Language, LanguageSchema, UnsupportedLanguageError
-from noentenc.translation.models._seq2seq import Precision, Seq2SeqModel
+from noentenc.translation.models._seq2seq import (
+    Precision,
+    Seq2SeqModel,
+    tokenizer_class,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from tokenizers import Tokenizer
 
 L = Language
 
@@ -157,7 +165,7 @@ class OpusMTModel(Seq2SeqModel):
         ):
             charsmap = _spm_precompiled_charsmap(files["source.spm"].read_bytes())
             normalizer["precompiled_charsmap"] = base64.b64encode(charsmap).decode()
-        return Tokenizer.from_str(json.dumps(spec))
+        return tokenizer_class().from_str(json.dumps(spec))
 
     def _frame(
         self, ids: list[int], source: Language | None, target: Language

@@ -1,6 +1,6 @@
 """heliport backend: a Rust port of HeLI-OTS (220 languages). GPL-3.0; no Windows wheels."""
 
-from noentenc.language_detection._optional import require
+from noentenc._optional import require
 from noentenc.language_detection.labels import (
     NO_LINGUISTIC_CONTENT,
     UNDETERMINED,
