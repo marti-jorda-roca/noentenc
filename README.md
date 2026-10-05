@@ -64,12 +64,24 @@ detector.detect("Bon dia! Com estàs?")
 # 'cat'
 detector.detect("Bon dia! Com estàs?", with_score=True, top_k=2)
 # {'cat': 0.88, 'por': 0.11}
-detector.detect_batch(["Hello there", "Hola, ¿qué tal?", "你好", ""])
-# ['eng', 'spa', 'zho', 'und']
+detector.detect_batch(["Hello there", "Hola, ¿qué tal?", "你好", "👍", ""])
+# ['eng', 'spa', 'zho', 'zxx', 'und']
 
 # Add a "lang" column to a pandas or polars DataFrame.
 detector.detect_dataset(df, "text", "lang")
 ```
+
+Text without letters outside URLs and email addresses, such as digits, emoji, punctuation or a bare link, returns `zxx` (no linguistic content) without running the model. Every other text gets the model's best guess, even `lol` or a person's name. To get `und` instead when the model is unsure, set thresholds, and use `detailed=True` to see why:
+
+```python
+detector = LanguageDetector(min_letters=4, min_score=0.5)
+detector.detect("lol", detailed=True)
+# Detection(language='und', status=<DetectionStatus.INSUFFICIENT_TEXT: 'insufficient_text'>, ...)
+
+LanguageDetector(candidates=["eng", "spa", "cat"])  # only ever answer one of these
+```
+
+Scores aren't calibrated and differ between backends, so a threshold that suits one backend doesn't suit another. [Benchmarks](docs/benchmarks.md#conservative-detection) lists tested settings and their wrong-label and abstention rates per backend.
 
 ## Translate
 
@@ -123,6 +135,7 @@ On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 
 | Example | Shows how to |
 |---|---|
 | [detect_dataset.py](docs/examples/detect_dataset.py) | Tag a DataFrame column and keep only confident English rows. |
+| [conservative_detection.py](docs/examples/conservative_detection.py) | Abstain on names, chat tokens and links instead of guessing, and restrict the candidate languages. |
 | [translate_to_english.py](docs/examples/translate_to_english.py) | Detect each message's language, then batch-translate everything into English. |
 | [choose_detection_backend.py](docs/examples/choose_detection_backend.py) | Swap backends, restrict candidate languages, collapse macrolanguages. |
 | [choose_translation_model.py](docs/examples/choose_translation_model.py) | Pick a model, precision and thread count, and run offline. |
@@ -158,7 +171,7 @@ LanguageDetector(FastTextModel("glotlid"))  # 2102 languages
 LanguageDetector(LinguaModel(languages=["cat", "spa", "eng"]))  # only these candidates
 ```
 
-- Labels are ISO 639-3 codes (`eng`, `cat`, `zho`). Empty and whitespace-only texts return `und`.
+- Labels are ISO 639-3 codes (`eng`, `cat`, `zho`). Empty and whitespace-only texts return `und`, and texts with no letters outside URLs and email addresses return `zxx`, for every backend and without running it.
   - `normalize_labels=False` returns each model's native codes instead.
   - `collapse_macrolanguages=True` folds individual languages into their macrolanguage (`arb` → `ara`, `cmn` → `zho`), so results from different models line up.
 - `FastTextModel` is our own numpy implementation of fastText inference. It needs neither the `fasttext` package nor onnxruntime, and it matches `fasttext`'s output to within 1e-6. Large `.bin` models are memory-mapped, so they open instantly.

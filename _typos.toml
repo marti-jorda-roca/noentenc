@@ -4,6 +4,8 @@ extend-exclude = [
   "src/noentenc/language_detection/_iso639.py",
   # Model label dumps and multilingual sample sentences
   "tests/unit/language_detection/fixtures/",
+  # Hand-labelled multilingual detection cases, misspellings included on purpose
+  "scripts/data/",
 ]
 
 [default]

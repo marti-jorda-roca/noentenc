@@ -27,9 +27,12 @@ def load_sentences() -> list[str]:
 def assert_fasttext_parity(
     model: FastTextModel, sentences: list[str], expected: list[dict]
 ) -> None:
-    """Compare our predictions with those recorded from the reference ``fasttext`` package."""
-    got = model.predict_batch_score(sentences, top_k=None)
-    top1 = model.predict_batch(sentences)
+    """Compare our predictions with those recorded from the reference ``fasttext`` package.
+
+    Runs the engine directly, so texts the base class labels by rule (``zxx``) are compared too.
+    """
+    got = model._predict_score_chunk(sentences, None)
+    top1 = model._predict_chunk(sentences)
     offset = 0.0 if model.args.loss == Loss.HS else FASTTEXT_OFFSET
     for sentence, scores, best, ref in zip(sentences, got, top1, expected, strict=True):
         ref_probs = np.array(ref["probs"])

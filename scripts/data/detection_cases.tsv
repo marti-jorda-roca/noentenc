@@ -1,0 +1,127 @@
+category	expected	text
+support	eng	My password reset link doesn't work.
+support	eng	I was charged twice this month.
+support	eng	Can I change my delivery address?
+support	eng	The app crashes when I open settings.
+support	spa	No puedo iniciar sesión en mi cuenta.
+support	spa	Me han cobrado dos veces este mes.
+support	spa	¿Cuándo llega mi pedido?
+support	spa	La aplicación se cierra al abrir los ajustes.
+support	fra	Je n'arrive pas à me connecter.
+support	fra	J'ai été débité deux fois ce mois-ci.
+support	fra	Quand ma commande sera-t-elle livrée ?
+support	deu	Ich kann mich nicht anmelden.
+support	deu	Mir wurde zweimal abgebucht.
+support	deu	Wann kommt meine Bestellung an?
+support	ita	Non riesco ad accedere al mio account.
+support	ita	Mi avete addebitato due volte.
+support	ita	Quando arriva il mio ordine?
+support	por	Não consigo entrar na minha conta.
+support	por	Fui cobrado duas vezes este mês.
+support	por	Quando chega a minha encomenda?
+support	nld	Ik kan niet inloggen op mijn account.
+support	nld	Er is twee keer geld afgeschreven.
+support	nld	Wanneer wordt mijn bestelling geleverd?
+support	cat	No puc iniciar la sessió al meu compte.
+support	cat	M'heu cobrat dues vegades aquest mes.
+support	cat	Quan arribarà la meva comanda?
+support	pol	Nie mogę zalogować się na konto.
+support	pol	Pobrano ode mnie opłatę dwa razy.
+support	rus	Не могу войти в свой аккаунт.
+support	rus	С меня дважды списали деньги.
+support	tur	Hesabıma giriş yapamıyorum.
+support	tur	Bu ay iki kez ücret alındı.
+support	jpn	ログインできません。
+support	jpn	注文はいつ届きますか？
+support	zho	我无法登录我的账户。
+support	zho	我的订单什么时候到？
+support	ara	لا أستطيع تسجيل الدخول إلى حسابي.
+support	ara	متى يصل طلبي؟
+support	swe	Jag kan inte logga in på mitt konto.
+support	swe	Jag har blivit debiterad två gånger.
+typo	eng	pls hlep my acount is lockd
+typo	eng	i cant loggin to the app
+typo	eng	wher is my oder??
+typo	eng	thnks for ur help
+typo	spa	nesesito ayuda con mi cuenta
+typo	spa	no me yega el codigo
+typo	spa	porfa ayudame q no puedo entrar
+typo	spa	grasias por la ayuda
+typo	fra	jarrive pas a me conecter
+typo	fra	merci pr votre aide
+typo	fra	jai pa recu mon colis
+typo	deu	ich kan mich nich einlogen
+typo	deu	wo bleipt meine bestelung
+typo	ita	nn riesco a entrare nel acount
+typo	ita	grazzie per l'aiuto
+typo	por	nao consigo entra na conta
+typo	por	obrigado pela ajda
+name	und	Jean-Pierre Dupont
+name	und	María José García López
+name	und	Hans Müller
+name	und	Giulia Rossi
+name	und	Nguyễn Văn An
+name	und	Olga Ivanova
+name	und	John Smith
+name	und	Kenji Watanabe
+name	und	Ahmed Hassan
+name	und	Lars Andersson
+related	cat	El tren de les vuit ha arribat amb retard aquest matí.
+related	cat	Demà farem una reunió per parlar del nou projecte.
+related	spa	El tren de las ocho ha llegado con retraso esta mañana.
+related	spa	Mañana haremos una reunión para hablar del nuevo proyecto.
+related	glg	Mañá imos ter unha reunión para falar do novo proxecto.
+related	por	Amanhã vamos ter uma reunião para falar do novo projeto.
+related	dan	Vi holder et møde i morgen for at tale om det nye projekt.
+related	nor	Vi har et møte i morgen for å snakke om det nye prosjektet.
+related	swe	Vi har ett möte i morgon för att prata om det nya projektet.
+related	ces	Zítra budeme mít schůzku, abychom probrali nový projekt.
+related	slk	Zajtra budeme mať stretnutie, aby sme prebrali nový projekt.
+related	hrv|hbs|bos	Sutra ćemo imati sastanak kako bismo razgovarali o novom projektu.
+related	srp|hbs	Сутра ћемо имати састанак да разговарамо о новом пројекту.
+related	ind	Besok kami akan mengadakan rapat untuk membahas proyek baru.
+related	msa	Esok kami akan mengadakan mesyuarat untuk membincangkan projek baharu.
+related	ukr	Завтра у нас буде зустріч, щоб обговорити новий проєкт.
+related	rus	Завтра у нас будет встреча, чтобы обсудить новый проект.
+related	afr	Môre hou ons 'n vergadering om oor die nuwe projek te praat.
+related	nld	Morgen houden we een vergadering om over het nieuwe project te praten.
+mixed	eng|spa	Hola, I need help with my order por favor
+mixed	fra|eng	Merci beaucoup, see you tomorrow!
+mixed	deu|eng	Das Meeting ist morgen, ok? Let me know.
+mixed	cat|eng	Bon dia! Can you send me the invoice?
+mixed	eng|ita	Thanks! Ci vediamo domani alle dieci.
+mixed	spa|eng	Mi pedido no ha llegado, the tracking number is wrong.
+mixed	deu|eng	Ich habe eine Frage about the refund policy.
+mixed	por|eng	Obrigado! The package arrived yesterday.
+long	eng	I ordered a pair of running shoes three weeks ago and the tracking page still says the parcel is waiting at the depot. I contacted the courier twice, but they told me to ask you. Could you check what happened and either send a replacement or refund the order? I would prefer the replacement if it can arrive before the end of the month.
+long	spa	Hace tres semanas pedí unas zapatillas para correr y la página de seguimiento sigue diciendo que el paquete está en el almacén. He contactado dos veces con la empresa de mensajería, pero me dicen que os pregunte a vosotros. ¿Podéis revisar qué ha pasado y enviarme otro par o devolverme el dinero? Prefiero el cambio si puede llegar antes de final de mes.
+long	fra	J'ai commandé une paire de chaussures de course il y a trois semaines et la page de suivi indique toujours que le colis attend au dépôt. J'ai contacté le transporteur deux fois, mais on m'a dit de m'adresser à vous. Pourriez-vous vérifier ce qui s'est passé et m'envoyer un remplacement ou me rembourser la commande ?
+long	deu	Ich habe vor drei Wochen ein Paar Laufschuhe bestellt, und die Sendungsverfolgung zeigt immer noch an, dass das Paket im Depot wartet. Ich habe den Paketdienst zweimal kontaktiert, aber man hat mir gesagt, ich solle mich an Sie wenden. Könnten Sie bitte prüfen, was passiert ist, und mir entweder Ersatz schicken oder die Bestellung erstatten?
+long	cat	Fa tres setmanes vaig demanar unes sabatilles per córrer i la pàgina de seguiment encara diu que el paquet és al magatzem. He contactat dues vegades amb l'empresa de missatgeria, però em diuen que us ho pregunti a vosaltres. Podeu revisar què ha passat i enviar-me'n un altre parell o retornar-me els diners?
+long	por	Encomendei um par de sapatilhas de corrida há três semanas e a página de seguimento ainda diz que a encomenda está à espera no armazém. Contactei a transportadora duas vezes, mas disseram-me para falar convosco. Podem verificar o que aconteceu e enviar-me outro par ou devolver-me o dinheiro?
+long	ita	Tre settimane fa ho ordinato un paio di scarpe da corsa e la pagina di tracciamento dice ancora che il pacco è fermo al deposito. Ho contattato il corriere due volte, ma mi hanno detto di rivolgermi a voi. Potreste controllare cosa è successo e inviarmi un altro paio oppure rimborsare l'ordine?
+long	nld	Drie weken geleden heb ik een paar hardloopschoenen besteld en de trackingpagina zegt nog steeds dat het pakket in het depot ligt. Ik heb de bezorgdienst twee keer gebeld, maar zij zeiden dat ik het aan jullie moest vragen. Kunnen jullie nagaan wat er is gebeurd en een nieuw paar sturen of de bestelling terugbetalen?
+nonlinguistic	zxx	123 456
+nonlinguistic	zxx	😀😀😀
+nonlinguistic	zxx	!!! ???
+nonlinguistic	zxx	https://foo.com
+nonlinguistic	zxx	https://example.com/reset?id=42
+nonlinguistic	zxx	www.example.org
+nonlinguistic	zxx	support@acme.io
+nonlinguistic	zxx	+34 600 123 456
+nonlinguistic	zxx	12/05/2026 14:30
+nonlinguistic	zxx	👍
+nonlinguistic	zxx	...
+nonlinguistic	zxx	#1234
+nonlinguistic	zxx	$49.99
+nonlinguistic	zxx	foo.com/path
+ambiguous	und	lol
+ambiguous	und	ok
+ambiguous	und	xD
+ambiguous	und	hmm
+ambiguous	und	jaja
+ambiguous	und	haha
+ambiguous	und	omg
+ambiguous	und	kk
+ambiguous	und	ty
+ambiguous	und	brb

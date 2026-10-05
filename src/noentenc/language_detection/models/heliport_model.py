@@ -30,6 +30,8 @@ class HeliportModel(BaseModel):
     Batches run in parallel in Rust.
     """
 
+    scores_every_label = False
+
     def __init__(
         self,
         model: str = "heliport",
