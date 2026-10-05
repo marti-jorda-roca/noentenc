@@ -1,6 +1,6 @@
 [project]
 name = "noentenc"
-version = "0.2.0"
+version = "0.3.0"
 description = "Lightweight, CPU-only language detection and translation for Python. Translation and extra detection backends are optional extras."
 readme = "README.md"
 authors = [
