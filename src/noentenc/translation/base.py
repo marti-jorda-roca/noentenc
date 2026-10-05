@@ -1,5 +1,5 @@
 from collections.abc import Callable, Hashable
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 from tqdm import tqdm
 
@@ -7,7 +7,7 @@ from noentenc._dataframe import column_values, with_column
 from noentenc.languages import Language, UnsupportedLanguageError
 from noentenc.profiles import Profile
 from noentenc.translation.models._seq2seq import Precision, Seq2SeqModel
-from noentenc.translation.models.base import BaseModel
+from noentenc.translation.models.base import BaseModel, Translation
 from noentenc.translation.models.nllb import NLLBModel
 from noentenc.translation.models.opus_mt import OPUS_MT_PAIRS, OpusMTModel
 from noentenc.translation.models.small100 import SMaLL100Model
@@ -87,13 +87,71 @@ class Translator:
             self.profile = Profile(model or Profile.SPEED)
         self._default_models: dict[Hashable, BaseModel] = {}
 
+    @overload
     def translate(
         self,
         text: str,
         target_language: Language,
         source_language: Language | None = None,
-    ) -> str:
-        return self.translate_batch([text], target_language, source_language)[0]
+        *,
+        truncate: bool = False,
+        detailed: Literal[False] = False,
+    ) -> str: ...
+
+    @overload
+    def translate(
+        self,
+        text: str,
+        target_language: Language,
+        source_language: Language | None = None,
+        *,
+        truncate: bool = False,
+        detailed: Literal[True],
+    ) -> Translation: ...
+
+    def translate(
+        self,
+        text: str,
+        target_language: Language,
+        source_language: Language | None = None,
+        *,
+        truncate: bool = False,
+        detailed: bool = False,
+    ) -> str | Translation:
+        """Translate `text`, sentence by sentence, keeping its whitespace and line breaks.
+
+        A sentence longer than the model reads raises `InputTooLongError`; with
+        `truncate` its end is dropped instead. With `detailed` the result is a
+        `Translation`, which says whether input was dropped or output cut short.
+        """
+        (translation,) = self._translate(
+            [text], target_language, source_language, 32, truncate
+        )
+        return translation if detailed else translation.text
+
+    @overload
+    def translate_batch(
+        self,
+        texts: list[str],
+        target_language: Language,
+        source_language: Language | None = None,
+        batch_size: int = 32,
+        *,
+        truncate: bool = False,
+        detailed: Literal[False] = False,
+    ) -> list[str]: ...
+
+    @overload
+    def translate_batch(
+        self,
+        texts: list[str],
+        target_language: Language,
+        source_language: Language | None = None,
+        batch_size: int = 32,
+        *,
+        truncate: bool = False,
+        detailed: Literal[True],
+    ) -> list[Translation]: ...
 
     def translate_batch(
         self,
@@ -101,9 +159,15 @@ class Translator:
         target_language: Language,
         source_language: Language | None = None,
         batch_size: int = 32,
-    ) -> list[str]:
-        model = self._model_for(source_language, target_language)
-        return model.predict_batch(texts, target_language, source_language, batch_size)
+        *,
+        truncate: bool = False,
+        detailed: bool = False,
+    ) -> list[str] | list[Translation]:
+        """Translate each of `texts`, like `translate`."""
+        translations = self._translate(
+            texts, target_language, source_language, batch_size, truncate
+        )
+        return translations if detailed else [t.text for t in translations]
 
     @overload
     def translate_dataset(
@@ -115,6 +179,8 @@ class Translator:
         source_language: Language | None = None,
         batch_size: int = 32,
         show_progress: bool = True,
+        *,
+        truncate: bool = False,
     ) -> pl.DataFrame: ...
 
     @overload
@@ -127,6 +193,8 @@ class Translator:
         source_language: Language | None = None,
         batch_size: int = 32,
         show_progress: bool = True,
+        *,
+        truncate: bool = False,
     ) -> pd.DataFrame: ...
 
     def translate_dataset(
@@ -138,15 +206,17 @@ class Translator:
         source_language: Language | None = None,
         batch_size: int = 32,
         show_progress: bool = True,
+        *,
+        truncate: bool = False,
     ) -> pl.DataFrame | pd.DataFrame:
         """Return `dataset` with `result_column` holding the translation of `target_column`.
 
-        Works with polars and pandas frames; null texts stay null.
+        Works with polars and pandas frames; null texts stay null. Texts are translated
+        like `translate`, including `truncate`.
         With `show_progress` a tqdm bar tracks the rows translated so far.
         """
         values = column_values(dataset, target_column)
         rows = [i for i, value in enumerate(values) if isinstance(value, str)]
-        model = self._model_for(source_language, target_language)
         texts = [values[i] for i in rows]
         translations: list[str] = []
         with tqdm(
@@ -155,8 +225,9 @@ class Translator:
             for start in range(0, len(texts), batch_size):
                 chunk = texts[start : start + batch_size]
                 translations.extend(
-                    model.predict_batch(
-                        chunk, target_language, source_language, batch_size
+                    t.text
+                    for t in self._translate(
+                        chunk, target_language, source_language, batch_size, truncate
                     )
                 )
                 progress.update(len(chunk))
@@ -164,6 +235,19 @@ class Translator:
         for i, translation in zip(rows, translations, strict=True):
             results[i] = translation
         return with_column(dataset, result_column, results, strings=True)
+
+    def _translate(
+        self,
+        texts: list[str],
+        target: Language,
+        source: Language | None,
+        batch_size: int,
+        truncate: bool,
+    ) -> list[Translation]:
+        model = self._model_for(source, target)
+        return model.predict_batch_detailed(
+            texts, target, source, batch_size, truncate=truncate
+        )
 
     def _model_for(self, source: Language | None, target: Language) -> BaseModel:
         if self.model is not None:

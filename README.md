@@ -92,6 +92,8 @@ translator.translate_dataset(df, "review", "review_en", Language.ENGLISH)
 
 `Translator()` picks the lightest model for each pair. It uses a dedicated Opus-MT model when one exists for the direction (66 directions, about 75M parameters each). For any other pair it uses SMaLL-100, which covers 100 languages. Languages are always `Language` enum members, so a typo fails at the call site, and a model that can't handle a pair raises `UnsupportedLanguageError`.
 
+Text of any length works. It is split into sentences, they are translated in one batch, and the translations are joined back with the original spaces, line breaks and blank lines. A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` instead of being cut silently. Pass `truncate=True` to translate only its start, and `detailed=True` to get a `Translation` that says whether input was dropped (`input_truncated`) or the output hit its length limit (`output_limit_reached`).
+
 ## Trade speed for quality
 
 `LanguageDetector` and `Translator` take a profile in place of a model: `"speed"` (the default), `"balance"` or `"quality"`.
@@ -121,6 +123,7 @@ On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 
 | [translate_to_english.py](docs/examples/translate_to_english.py) | Detect each message's language, then batch-translate everything into English. |
 | [choose_detection_backend.py](docs/examples/choose_detection_backend.py) | Swap backends, restrict candidate languages, collapse macrolanguages. |
 | [choose_translation_model.py](docs/examples/choose_translation_model.py) | Pick a model, precision and thread count, and run offline. |
+| [translate_long_text.py](docs/examples/translate_long_text.py) | Translate emails and documents, and choose between an error and `truncate=True` for over-long sentences. |
 | [choose_profile.py](docs/examples/choose_profile.py) | Trade latency for quality with the `speed`, `balance` and `quality` profiles. |
 | [custom_models.py](docs/examples/custom_models.py) | Plug your own detector and translator into the same API. |
 

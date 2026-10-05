@@ -71,6 +71,32 @@ translator.translate_batch(
 # ['¿Dónde está la estación?', 'Me encanta esta ciudad.']
 ```
 
+### Long text
+
+Emails and documents can go in whole. The models are trained on single sentences, so `Translator` splits the text into sentences, translates them in one batch and joins the translations back with the original whitespace. Line breaks and blank lines stay where they were.
+
+```python
+translator.translate(
+    "Hi Ana,\n\nThanks for your help.\n- See you on Monday.\n- Call me later.",
+    Language.SPANISH,
+    Language.ENGLISH,
+)
+# 'Hola Ana,\n\nGracias por tu ayuda.\n- Nos vemos el lunes.\n- Llámame más tarde.'
+```
+
+A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` rather than losing its end. `truncate=True` translates its start instead. To find out whether that happened, or whether a translation stopped at the output length limit, ask for details.
+
+```python
+result = translator.translate(
+    email_body, Language.SPANISH, Language.ENGLISH, truncate=True, detailed=True
+)
+result.text
+result.input_truncated  # True if part of a sentence was dropped
+result.output_limit_reached  # True if the output may be cut short
+```
+
+`translate_batch` takes the same `truncate` and `detailed` arguments, and `translate_dataset` takes `truncate`.
+
 ## Detect, then translate
 
 The detector returns ISO 639-3 codes (`deu`), but `Language` values use ISO 639-1 where a two-letter code exists (`de`). Build a lookup once with `to_iso639_3`.
