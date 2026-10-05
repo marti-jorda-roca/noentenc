@@ -5,10 +5,20 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 from tqdm import tqdm
 
 from noentenc._batching import check_batch_size, check_texts
+from noentenc._catalog import DETECTION_FILE_SIZES
 from noentenc._dataframe import column_values, with_column
+from noentenc._plan import (
+    Constraints,
+    ModelConstraintError,
+    ModelPlan,
+    Plan,
+    detection_memory,
+)
 from noentenc.language_detection._conservative import Detection, Policy
+from noentenc.language_detection._download import is_cached
 from noentenc.language_detection.models.base import BaseModel
 from noentenc.language_detection.models.fasttext import FastTextModel
+from noentenc.language_detection.models.fasttext.model import PRESETS
 from noentenc.profiles import Profile
 
 if TYPE_CHECKING:
@@ -34,6 +44,43 @@ PROFILE_PRESETS: dict[Profile, str] = {
 def profile_remote_files(profile: Profile | str) -> list[RemoteFile]:
     """The files `LanguageDetector(profile)` downloads."""
     return FastTextModel.remote_files(PROFILE_PRESETS[Profile(profile)])
+
+
+def profile_plan(
+    profile: Profile | str, cache_dir: str | Path | None = None
+) -> ModelPlan:
+    """What `LanguageDetector(profile)` loads and costs, without downloading it."""
+    preset = PROFILE_PRESETS[Profile(profile)]
+    remotes = FastTextModel.remote_files(preset)
+    download = sum(DETECTION_FILE_SIZES[remote.cache_path] for remote in remotes)
+    memory, basis = detection_memory(preset, download)
+    return ModelPlan(
+        task="detection",
+        name=f"FastTextModel({preset})",
+        precision=None,
+        license=PRESETS[preset].license,
+        download_bytes=download,
+        memory_bytes=memory,
+        memory_basis=basis,
+        cached=all(is_cached(remote, cache_dir) for remote in remotes),
+        files=tuple(remote.cache_path for remote in remotes),
+    )
+
+
+def check_profile_plan(
+    profile: Profile | str,
+    constraints: Constraints,
+    cache_dir: str | Path | None = None,
+) -> ModelPlan:
+    """`profile_plan`, raising `ModelConstraintError` if `constraints` reject it."""
+    plan = profile_plan(profile, cache_dir)
+    reason = constraints.rejection(plan)
+    if reason is not None:
+        raise ModelConstraintError(
+            f"The {Profile(profile)} detection model, {plan.name}, doesn't meet the "
+            f"constraints: {reason}. Pick another profile or pass a model explicitly."
+        )
+    return plan
 
 
 class LanguageDetector:
@@ -71,6 +118,10 @@ class LanguageDetector:
     default), or with ``only_local_files`` only reads it from there, failing at once when
     it is missing. ``noentenc.prepare`` downloads it ahead of time. For a ``model`` you
     pass, give these options to the model instead.
+
+    ``allowed_licenses`` (SPDX identifiers) and ``max_download_bytes`` make a profile
+    raise ``ModelConstraintError`` before downloading a model that breaks them.
+    ``plan()`` says what the profile loads and costs.
     """
 
     def __init__(
@@ -83,16 +134,23 @@ class LanguageDetector:
         candidates: Iterable[str] | None = None,
         only_local_files: bool = False,
         cache_dir: str | Path | None = None,
+        allowed_licenses: Iterable[str] | None = None,
+        max_download_bytes: int | None = None,
     ) -> None:
+        constraints = Constraints.of(allowed_licenses, max_download_bytes)
+        self.profile: Profile | None = None
+        self.cache_dir = cache_dir
         if isinstance(model, BaseModel):
-            if only_local_files or cache_dir is not None:
+            if only_local_files or cache_dir is not None or constraints.active:
                 raise ValueError(
-                    "only_local_files and cache_dir apply to the model a profile "
-                    "loads; pass them to your model instead"
+                    "only_local_files, cache_dir and the licence and size constraints "
+                    "apply to the model a profile loads; pass a model that meets them"
                 )
         else:
+            self.profile = Profile(model or Profile.SPEED)
+            check_profile_plan(self.profile, constraints, cache_dir)
             model = FastTextModel(
-                PROFILE_PRESETS[Profile(model or Profile.SPEED)],
+                PROFILE_PRESETS[self.profile],
                 only_local_files,
                 cache_dir=cache_dir,
             )
@@ -104,6 +162,14 @@ class LanguageDetector:
             min_letters=min_letters,
             candidates=candidates,
         )
+
+    def plan(self) -> Plan:
+        """The profile's model and what it costs. Only for detectors built from a profile."""
+        if self.profile is None:
+            raise ValueError(
+                "plan() describes profile models; this detector was given one"
+            )
+        return Plan((profile_plan(self.profile, self.cache_dir),))
 
     @overload
     def detect(

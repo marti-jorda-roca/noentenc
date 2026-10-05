@@ -44,6 +44,7 @@ class M2M100Model(Seq2SeqModel):
     default_revision: ClassVar[str] = "9c374f0b7aca709787cea97b047bfbbd1559d177"
     # The q4 export scores up to 26 chrF++ lower on FLORES-200 and is 2x larger.
     default_precision: ClassVar[Precision] = Precision.INT8
+    weights_license: ClassVar[str | None] = "MIT"
 
     def _load_tokenizer(self, files: dict[str, Path]) -> Tokenizer:
         try:

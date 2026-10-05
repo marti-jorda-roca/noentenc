@@ -18,6 +18,7 @@ from noentenc.languages import (
 from noentenc.profiles import Profile
 from noentenc.translation import _routing as routing_module
 from noentenc.translation.base import Translator
+from noentenc.translation.models._seq2seq import Seq2SeqModel
 from noentenc.translation.models.base import (
     BaseModel,
     InputTooLongError,
@@ -25,6 +26,7 @@ from noentenc.translation.models.base import (
     TranslationStatus,
 )
 from noentenc.translation.models.nllb import NLLBModel
+from noentenc.translation.models.opus_mt import OpusMTModel
 from noentenc.translation.models.small100 import SMaLL100Model
 
 EN, ES = Language.ENGLISH, Language.SPANISH
@@ -129,9 +131,18 @@ def test_truncate_reaches_the_model() -> None:
 
 
 class FakeSeq2Seq(UpperModel):
-    """Stands in for a `Seq2SeqModel` class in profile routing; records every load."""
+    """Stands in for a `Seq2SeqModel` class in profile routing; records every load.
+
+    Has the file layout of the real class it replaces, so plans and constraints work.
+    """
 
     loads: list[dict[str, object]] = []
+    onnx_files = OpusMTModel.onnx_files
+    extra_files: tuple[str, ...] = ()
+    default_precision = OpusMTModel.default_precision
+    weights_license: str | None = None
+    filenames = Seq2SeqModel.__dict__["filenames"]
+    _check_precision = Seq2SeqModel.__dict__["_check_precision"]
 
     def __init__(
         self,
@@ -170,6 +181,7 @@ class FakeSeq2Seq(UpperModel):
 
 class FakeOpus(FakeSeq2Seq):
     created: list[tuple[Language, Language]] = []
+    extra_files = OpusMTModel.extra_files
 
     def __init__(
         self, model: str | None = None, *args: object, **kwargs: object
@@ -184,6 +196,9 @@ class FakeSmall100(FakeSeq2Seq):
     schema = SMaLL100Model.schema
     default_model = SMaLL100Model.default_model
     default_revision = SMaLL100Model.default_revision
+    onnx_files = SMaLL100Model.onnx_files
+    default_precision = SMaLL100Model.default_precision
+    weights_license = SMaLL100Model.weights_license
     created = 0
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -195,6 +210,8 @@ class FakeNLLB(FakeSeq2Seq):
     schema = NLLBModel.schema
     default_model = NLLBModel.default_model
     default_revision = NLLBModel.default_revision
+    default_precision = NLLBModel.default_precision
+    weights_license = NLLBModel.weights_license
     created: list[str | None] = []
 
     def __init__(

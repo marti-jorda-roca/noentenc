@@ -10,7 +10,14 @@ from tqdm import tqdm
 
 from noentenc._batching import check_batch_size, check_texts, is_blank
 from noentenc._dataframe import column_values, with_column
-from noentenc.languages import Language, UnsupportedLanguageError, to_language
+from noentenc._plan import Constraints, Plan
+from noentenc.languages import (
+    ANY_LANGUAGE,
+    Language,
+    LanguageSchema,
+    UnsupportedLanguageError,
+    to_language,
+)
 from noentenc.profiles import Profile
 from noentenc.translation import _routing
 from noentenc.translation.models.base import (
@@ -20,6 +27,7 @@ from noentenc.translation.models.base import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
     import pandas as pd
@@ -100,6 +108,13 @@ class Translator:
     is missing. `noentenc.prepare` downloads them ahead of time. For a `model` you pass,
     give these options to the model instead.
 
+    `allowed_licenses` (SPDX identifiers, e.g. `["MIT", "Apache-2.0", "CC-BY-4.0"]`)
+    and `max_download_bytes` restrict what a profile may pick. A model that breaks them
+    is skipped for the profile's next choice, and when none is left the call raises
+    `ModelConstraintError` before downloading anything (with `"auto"`, those texts get
+    `UNSUPPORTED_SOURCE`). `plan()`, `supports()` and `supported_languages()` answer
+    what a profile would do without loading or downloading a model.
+
     Languages can be `Language` members or codes and names that `to_language` accepts,
     such as `"es"`, `"spa"`, `"es-ES"` or `"spanish"`.
     """
@@ -112,12 +127,15 @@ class Translator:
         only_local_files: bool = False,
         cache_dir: str | Path | None = None,
         detector: LanguageDetector | None = None,
+        allowed_licenses: Iterable[str] | None = None,
+        max_download_bytes: int | None = None,
     ) -> None:
+        self.constraints = Constraints.of(allowed_licenses, max_download_bytes)
         if isinstance(model, BaseModel):
-            if only_local_files or cache_dir is not None:
+            if only_local_files or cache_dir is not None or self.constraints.active:
                 raise ValueError(
-                    "only_local_files and cache_dir apply to the models a profile "
-                    "loads; pass them to your model instead"
+                    "only_local_files, cache_dir and the licence and size constraints "
+                    "apply to the models a profile loads; pass a model that meets them"
                 )
             self.model: BaseModel | None = model
             self.profile = Profile.SPEED  # only picks the default detector
@@ -143,9 +161,94 @@ class Translator:
                     self.profile,
                     only_local_files=self.only_local_files,
                     cache_dir=self.cache_dir,
+                    allowed_licenses=self.constraints.allowed_licenses,
+                    max_download_bytes=self.constraints.max_download_bytes,
                     **AUTO_DETECTION_SETTINGS,  # ty: ignore[invalid-argument-type]
                 )
             return self._detector
+
+    def plan(
+        self,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
+    ) -> Plan:
+        """The models translating into `target_language` would load, and their costs.
+
+        Loads and downloads nothing. With `source_language="auto"` the plan holds the
+        detector and every model a detected language could be routed to. Raises like
+        `translate` when no allowed model translates the pair.
+        """
+        from noentenc.language_detection.base import check_profile_plan
+
+        if self.model is not None:
+            raise ValueError(
+                "plan() describes profile models; this translator was given one"
+            )
+        target, source, auto = _check_arguments(
+            target_language, source_language, 32, "raise"
+        )
+        if not auto:
+            choice = _routing.choose(self.profile, source, target, self.constraints)
+            return Plan((choice.plan(self.cache_dir),))
+        choices = dict.fromkeys(
+            choice
+            for candidate in (None, *Language)
+            if candidate != target
+            and (choice := self._choice_or_none(candidate, target)) is not None
+        )
+        detector = check_profile_plan(self.profile, self.constraints, self.cache_dir)
+        return Plan((detector, *(choice.plan(self.cache_dir) for choice in choices)))
+
+    def supports(
+        self,
+        target_language: Language | str,
+        source_language: Language | str | None = None,
+    ) -> bool:
+        """Whether a model (allowed by the constraints) translates the pair. Loads nothing."""
+        target, source, auto = _check_arguments(
+            target_language, source_language, 32, "raise"
+        )
+        if self.model is not None:
+            return auto or self.model.schema.supports(source, target)
+        if auto:
+            return self._choice_or_none(None, target) is not None or any(
+                self._choice_or_none(candidate, target) is not None
+                for candidate in Language
+                if candidate != target
+            )
+        return self._choice_or_none(source, target) is not None
+
+    def supported_languages(self) -> LanguageSchema:
+        """The languages this translator reads and writes, under its constraints.
+
+        `source` is `ANY_LANGUAGE` when some target is reachable without a source
+        language. Not every source pairs with every target; `supports()` checks a pair.
+        """
+        if self.model is not None:
+            return self.model.schema
+        sources: set[Language] = set()
+        targets: set[Language] = set()
+        any_source = False
+        for target in Language:
+            if self._choice_or_none(None, target) is not None:
+                any_source = True
+                targets.add(target)
+            for source in Language:
+                if source != target and self._choice_or_none(source, target):
+                    sources.add(source)
+                    targets.add(target)
+        return LanguageSchema(
+            source=ANY_LANGUAGE if any_source else frozenset(sources),
+            target=frozenset(targets),
+        )
+
+    def _choice_or_none(
+        self, source: Language | None, target: Language
+    ) -> _routing.ModelChoice | None:
+        try:
+            return _routing.choose(self.profile, source, target, self.constraints)
+        except UnsupportedLanguageError:
+            return None
 
     @property
     def loaded_models(self) -> list[BaseModel]:
@@ -557,7 +660,7 @@ class Translator:
             self.model.schema.validate(source, target, type(self.model).__name__)
             model = self.model
             return id(model), lambda: model
-        choice = _routing.choose(self.profile, source, target)
+        choice = _routing.choose(self.profile, source, target, self.constraints)
         return choice, lambda: self._cached(
             choice,
             lambda: choice.build(
