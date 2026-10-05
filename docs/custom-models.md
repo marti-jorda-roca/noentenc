@@ -88,7 +88,7 @@ Rules every backend follows:
 - **Return ISO 639-3 labels by default.** `to_iso639_3` and `normalize_scores` convert ISO 639-1, FLORES (`eng_Latn`), BCP-47 (`zh-Latn`) and fastText labels. They also honour `collapse_macrolanguages`.
 - **Higher scores mean more likely.** Say in the docstring whether the scores are probabilities.
 - **Set `sort_batches_by_length = True` if the model pads each batch to its longest text**, as transformers do. The base class then groups texts of similar length and still returns results in input order.
-- **Import optional dependencies lazily** with `noentenc.language_detection._optional.require("module", "extra")`, so users without the extra get an install hint instead of an `ImportError` at import time.
+- **Import optional dependencies lazily** with `noentenc._optional.require("module", "extra")`, so users without the extra get an install hint instead of an `ImportError` at import time.
 
 ## 3. A new translation model
 

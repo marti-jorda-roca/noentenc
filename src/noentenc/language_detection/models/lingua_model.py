@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from typing import Any
 
-from noentenc.language_detection._optional import require
+from noentenc._optional import require
 from noentenc.language_detection.labels import UNDETERMINED
 from noentenc.language_detection.models.base import BaseModel
 

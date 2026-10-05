@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from functools import cached_property
 from pathlib import Path
+from typing import TypeVar
 
 from noentenc._batching import check_batch_size, is_blank
 from noentenc.language_detection.labels import (
@@ -122,18 +123,21 @@ class BaseModel(ABC):
         )
 
 
-def _run_batched[T](
+_T = TypeVar("_T")
+
+
+def _run_batched(
     texts: list[str],
     batch_size: int,
-    run: Callable[[list[str]], list[T]],
-    empty: Callable[[], T],
+    run: Callable[[list[str]], list[_T]],
+    empty: Callable[[], _T],
     sort_by_length: bool = False,
-) -> list[T]:
+) -> list[_T]:
     check_batch_size(batch_size)
     keep = [i for i, text in enumerate(texts) if not is_blank(text)]
     if sort_by_length:
         keep.sort(key=lambda i: len(texts[i]))
-    results: list[T | None] = [None] * len(texts)
+    results: list[_T | None] = [None] * len(texts)
     for start in range(0, len(keep), batch_size):
         idx = keep[start : start + batch_size]
         for i, result in zip(idx, run([texts[i] for i in idx]), strict=True):

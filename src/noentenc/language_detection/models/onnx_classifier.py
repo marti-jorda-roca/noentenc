@@ -1,4 +1,7 @@
-"""Transformer sequence classifiers for language identification, run with onnxruntime."""
+"""Transformer sequence classifiers for language identification, run with onnxruntime.
+
+onnxruntime and tokenizers come with the ``onnx`` extra and are imported when a model is built.
+"""
 
 import json
 from dataclasses import dataclass
@@ -6,9 +9,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
-from tokenizers import Tokenizer
 
 from noentenc._onnx import create_session, pad
+from noentenc._optional import ONNX_EXTRA, require
 from noentenc.language_detection._download import RemoteFile, fetch
 from noentenc.language_detection.models.base import BaseModel
 
@@ -83,6 +86,9 @@ class OnnxClassifierModel(BaseModel):
         super().__init__(
             model, only_local_files, normalize_labels, collapse_macrolanguages
         )
+        # Checked before downloading weights that couldn't be run.
+        tokenizers = require("tokenizers", ONNX_EXTRA)
+        require("onnxruntime", ONNX_EXTRA)
         onnx_path, tokenizer_path, config_path = self._resolve(model, only_local_files)
         if max_length is None:
             preset = PRESETS.get(model) if isinstance(model, str) else None
@@ -94,7 +100,7 @@ class OnnxClassifierModel(BaseModel):
         self._mapper = self._label_mapper(self.native_labels)
         self._pad_id = int(config.get("pad_token_id") or 0)
 
-        self._tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        self._tokenizer = tokenizers.Tokenizer.from_file(str(tokenizer_path))
         self._tokenizer.no_padding()
         self._tokenizer.enable_truncation(max_length=max_length)
         self._max_chars = max_length * MAX_CHARS_PER_TOKEN

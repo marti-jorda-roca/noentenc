@@ -4,13 +4,13 @@ This page walks through the basics: detect a language, translate text, and choos
 
 ## Install
 
-noentenc needs Python 3.14 or newer.
+noentenc needs Python 3.11 or newer.
 
 ```bash
-uv add noentenc
+uv add 'noentenc[translation]'
 ```
 
-The core install has the fastText, ONNX and langid detection backends and every translation model. Weights download the first time you use a model, so expect the first call to be slow. After that they load from the cache.
+That installs detection and every translation model. If you only detect languages, `uv add noentenc` is enough: it has the fastText and langid backends and needs only numpy. Weights download the first time you use a model, so expect the first call to be slow. After that they load from the cache.
 
 ## Detect a language
 
@@ -187,7 +187,7 @@ from noentenc.language_detection import (
 # Rare and low-resource languages: GlotLID knows 2102 (1.7 GB download).
 LanguageDetector(FastTextModel("glotlid"))
 
-# A small transformer trained on OpenLID: 201 languages, 25 MB.
+# A small transformer trained on OpenLID: 201 languages, 25 MB. Needs `noentenc[onnx]`.
 LanguageDetector(OnnxClassifierModel("bert-openlid"))
 
 # You already know the text is one of a few languages. Needs `uv add 'noentenc[lingua]'`.

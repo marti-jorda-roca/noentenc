@@ -1,13 +1,4 @@
-"""Lazy imports for optional backends, with an actionable error when the extra is missing."""
+# Kept for custom backends that imported `require` from here before it moved.
+from noentenc._optional import require
 
-import importlib
-from types import ModuleType
-
-
-def require(module: str, extra: str) -> ModuleType:
-    try:
-        return importlib.import_module(module)
-    except ImportError as exc:
-        raise ImportError(
-            f"{module!r} is required for this model. Install it with: uv add 'noentenc[{extra}]'"
-        ) from exc
+__all__ = ["require"]

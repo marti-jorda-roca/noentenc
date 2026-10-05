@@ -46,3 +46,7 @@ archive.zip
 .DS_Store
 
 .codspeed
+
+# Session files that tools create for an in-memory database name, e.g. ":memory:.ses".
+# ":" is not allowed in Windows paths, so a committed one breaks checkout there.
+/:memory:*

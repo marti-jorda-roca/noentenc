@@ -1,11 +1,19 @@
-import json
-from pathlib import Path
-from typing import ClassVar
+from __future__ import annotations
 
-from tokenizers import Tokenizer
+import json
+from typing import TYPE_CHECKING, ClassVar
 
 from noentenc.languages import Language, LanguageSchema
-from noentenc.translation.models._seq2seq import Precision, Seq2SeqModel
+from noentenc.translation.models._seq2seq import (
+    Precision,
+    Seq2SeqModel,
+    tokenizer_class,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from tokenizers import Tokenizer
 
 # M2M100 language code for each supported language (token `__{code}__`).
 M2M100_CODES: dict[Language, str] = {
@@ -42,7 +50,7 @@ class M2M100Model(Seq2SeqModel):
             return super()._load_tokenizer(files)
         except Exception:  # tokenizers raises a bare Exception on invalid files
             spec = json.loads(files["tokenizer.json"].read_text())
-            return Tokenizer.from_str(json.dumps(_drop_invalid_merges(spec)))
+            return tokenizer_class().from_str(json.dumps(_drop_invalid_merges(spec)))
 
     def _language_id(self, language: Language) -> int:
         return self._token_id(f"__{M2M100_CODES[language]}__")

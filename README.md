@@ -27,7 +27,7 @@ Translator().translate("The weather is nice today.", Language.SPANISH, Language.
 
 - **Fast.** Detects a language in as little as 2.5 µs and translates a sentence in about 52 ms, on a laptop CPU. See [benchmarks](docs/benchmarks.md).
 - **Faster than the originals.** Up to 470× faster than `langid.py`, 2× faster than the C++ `fasttext` package and 5.8× faster than transformers + PyTorch, with the same accuracy. See [the comparison](docs/benchmarks.md#against-the-original-implementations).
-- **Small.** The default detection model is 0.9 MB. noentenc has no torch, transformers or GPU dependency, only numpy, onnxruntime, tokenizers, huggingface-hub and tqdm.
+- **Small.** The default detection model is 0.9 MB, and detection needs only numpy and tqdm. Translation adds onnxruntime, tokenizers and huggingface-hub. There is no torch, transformers or GPU dependency.
 - **One API, many models.** 12 detection models and 4 translation model families sit behind the same two classes. Swapping one is a one-line change, and every detector returns the same ISO 639-3 labels.
 - **Built for datasets.** You can pass a single string, a list or a pandas or polars column.
 
@@ -37,18 +37,19 @@ New to noentenc? The [quickstart](docs/quickstart.md) covers detection, translat
 
 noentenc uses [uv](https://docs.astral.sh/uv/) to manage dependencies.
 
-Requires Python 3.14 or newer. Install with pip or uv:
+Requires Python 3.11 or newer, on Linux, macOS or Windows. Install with pip or uv:
 
 ```bash
-pip install noentenc
-pip install 'noentenc[all]'
-```
-
-```bash
-uv add noentenc                  # fastText, ONNX and langid detection + every translation model
+uv add noentenc                  # detection only: fastText and langid, with numpy
+uv add 'noentenc[translation]'   # detection and every translation model
+uv add 'noentenc[onnx]'          # the ONNX detection models (bert-openlid, xlm-roberta-lid)
 uv add 'noentenc[lingua,cld3]'   # extra detection backends, see the table below
-uv add 'noentenc[all]'
+uv add 'noentenc[all]'           # everything
 ```
+
+With pip, the same extras work: `pip install 'noentenc[translation]'`.
+
+Python 3.10 isn't supported: onnxruntime 1.30, pandas 3 and the current numpy releases have no Python 3.10 wheels.
 
 Weights download on first use to `~/.cache/noentenc` (detection) and the Hugging Face cache (translation). Nothing is bundled in the wheel.
 
@@ -143,8 +144,8 @@ On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 
 | | `glotlid` | core | 2102 | 1.7 GB | Apache-2.0 |
 | | `nllb-lid218e` | core | 218 | 1.2 GB | CC-BY-NC-4.0 |
 | | path to a `.bin`/`.ftz` | core | | | |
-| `OnnxClassifierModel` | `bert-openlid` (int8) | core | 201 | 25 MB | MIT |
-| | `xlm-roberta-lid` (int8) | core | 20 | 279 MB | MIT |
+| `OnnxClassifierModel` | `bert-openlid` (int8) | `noentenc[onnx]` | 201 | 25 MB | MIT |
+| | `xlm-roberta-lid` (int8) | `noentenc[onnx]` | 20 | 279 MB | MIT |
 | `LangidModel` | | core | 97 | 1.9 MB | BSD-2-Clause |
 | `LinguaModel` | | `noentenc[lingua]` | 75 | ~300 MB wheel | Apache-2.0 |
 | `Cld3Model` | | `noentenc[cld3]` | 107 | 1 MB | Apache-2.0 |
@@ -164,6 +165,8 @@ LanguageDetector(LinguaModel(languages=["cat", "spa", "eng"]))  # only these can
 - `LangidModel` is our own numpy implementation of [langid.py](https://github.com/saffsd/langid.py). It reads the weights from the langid 1.1.6 source release on PyPI, without installing or importing the `langid` package, and matches its probabilities to within 1e-9.
 
 ### Translation
+
+Every translation model needs `noentenc[translation]`.
 
 | Model | Languages | Download (default precision) | Licence (weights) |
 |---|---|---|---|
