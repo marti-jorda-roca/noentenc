@@ -57,8 +57,8 @@ class Seq2SeqModel(BaseModel):
     Subclasses describe where their files live and how language tokens frame the
     input; the decoding itself is done by `Seq2SeqOnnxEngine`.
 
-    Hugging Face repos download into `<cache_dir>/hub`; without `cache_dir`, into
-    `$NOENTENC_CACHE/hub` if that is set, else the Hugging Face cache.
+    Hugging Face repos download into `<cache_dir>/hub` (see `noentenc._cache` for the
+    default).
     """
 
     default_model: ClassVar[str]

@@ -6,7 +6,6 @@ cache state from looking at the cache directory.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -168,18 +167,8 @@ def detection_memory(preset: str, download_bytes: int) -> tuple[int, str]:
 
 
 def hf_cached(
-    repo: str, revision: str, filenames: Iterable[str], cache_dir: Path | None
+    repo: str, revision: str, filenames: Iterable[str], cache_dir: Path
 ) -> bool:
     """Whether every file is in the Hugging Face cache at `revision` (a commit)."""
-    root = cache_dir or _default_hf_cache()
-    snapshot = root / f"models--{repo.replace('/', '--')}" / "snapshots" / revision
+    snapshot = cache_dir / f"models--{repo.replace('/', '--')}" / "snapshots" / revision
     return all((snapshot / name).is_file() for name in filenames)
-
-
-def _default_hf_cache() -> Path:
-    if os.environ.get("HF_HUB_CACHE"):
-        return Path(os.environ["HF_HUB_CACHE"])
-    if os.environ.get("HF_HOME"):
-        return Path(os.environ["HF_HOME"]) / "hub"
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    return (Path(xdg) if xdg else Path.home() / ".cache") / "huggingface" / "hub"

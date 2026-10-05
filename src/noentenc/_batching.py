@@ -1,12 +1,23 @@
 from collections.abc import Sequence
 
 
+def check_int(
+    name: str, value: object, *, optional: bool = False, minimum: int = 1
+) -> int | None:
+    """`value` if it is an int of at least `minimum` (or None when `optional`), else raise."""
+    if value is None and optional:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        kind = "an int or None" if optional else "an int"
+        raise TypeError(f"{name} must be {kind}, got {type(value).__name__}")
+    if value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}, got {value}")
+    return value
+
+
 def check_batch_size(batch_size: object) -> None:
     """Reject a `batch_size` that isn't a positive int, before any model is loaded."""
-    if isinstance(batch_size, bool) or not isinstance(batch_size, int):
-        raise TypeError(f"batch_size must be an int, got {type(batch_size).__name__}")
-    if batch_size < 1:
-        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+    check_int("batch_size", batch_size)
 
 
 def check_texts(texts: object) -> None:

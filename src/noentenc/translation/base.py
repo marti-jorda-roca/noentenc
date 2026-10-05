@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final, Literal, overload
 
 from tqdm import tqdm
 
-from noentenc._batching import check_batch_size, check_texts, is_blank
+from noentenc._batching import check_batch_size, check_int, check_texts, is_blank
 from noentenc._dataframe import column_values, with_column
 from noentenc._plan import Constraints, Plan
 from noentenc.languages import (
@@ -151,7 +151,9 @@ class Translator:
             self.profile = Profile(model or Profile.SPEED)
         self.only_local_files = only_local_files
         self.cache_dir = cache_dir
-        self.max_loaded_models = _check_max_loaded_models(max_loaded_models)
+        self.max_loaded_models = check_int(
+            "max_loaded_models", max_loaded_models, optional=True
+        )
         self._detector = detector
         # Loaded profile models, least recently used first.
         self._default_models: OrderedDict[Hashable, BaseModel] = OrderedDict()
@@ -198,10 +200,7 @@ class Translator:
             choice = _routing.choose(self.profile, source, target, self.constraints)
             return Plan((choice.plan(self.cache_dir),))
         choices = dict.fromkeys(
-            choice
-            for candidate in (None, *Language)
-            if candidate != target
-            and (choice := self._choice_or_none(candidate, target)) is not None
+            _routing.auto_choices(self.profile, target, self.constraints)
         )
         detector = check_profile_plan(self.profile, self.constraints, self.cache_dir)
         return Plan((detector, *(choice.plan(self.cache_dir) for choice in choices)))
@@ -218,11 +217,8 @@ class Translator:
         if self.model is not None:
             return auto or self.model.schema.supports(source, target)
         if auto:
-            return self._choice_or_none(None, target) is not None or any(
-                self._choice_or_none(candidate, target) is not None
-                for candidate in Language
-                if candidate != target
-            )
+            choices = _routing.auto_choices(self.profile, target, self.constraints)
+            return next(choices, None) is not None
         return self._choice_or_none(source, target) is not None
 
     def supported_languages(self) -> LanguageSchema:
@@ -724,18 +720,6 @@ class Translator:
 
 def _model_name(model: BaseModel) -> str:
     return f"{type(model).__name__}({getattr(model, 'model', '')})"
-
-
-def _check_max_loaded_models(value: object) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(
-            f"max_loaded_models must be an int or None, got {type(value).__name__}"
-        )
-    if value < 1:
-        raise ValueError(f"max_loaded_models must be >= 1, got {value}")
-    return value
 
 
 def _check_arguments(

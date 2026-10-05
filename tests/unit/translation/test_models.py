@@ -278,11 +278,11 @@ def test_spm_charsmap_is_read_from_model_proto() -> None:
 
 def test_resolve_files_reads_local_dir(tmp_path: Path) -> None:
     (tmp_path / "config.json").write_text("{}")
-    assert resolve_files(tmp_path, ["config.json"]) == {
+    assert resolve_files(tmp_path, ["config.json"], cache_dir=tmp_path) == {
         "config.json": tmp_path / "config.json"
     }
     with pytest.raises(FileNotFoundError, match="tokenizer.json"):
-        resolve_files(tmp_path, ["config.json", "tokenizer.json"])
+        resolve_files(tmp_path, ["config.json", "tokenizer.json"], cache_dir=tmp_path)
 
 
 @pytest.mark.parametrize(

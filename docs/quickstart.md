@@ -392,7 +392,7 @@ translator = Translator(only_local_files=True, cache_dir="/models")
 
 `prepare` downloads the profile's detection model (`detection=False` skips it) and, for each `(source, target)` pair, the model that profile's `Translator` would pick. A `None` source is translation without a source language. It doesn't load any of them. With `only_local_files=True`, a model that isn't there raises `FileNotFoundError` straight away, and the message says what to prepare. Models you build yourself take the same `only_local_files` and `cache_dir` arguments.
 
-One directory holds both kinds of weights. The cache root is the `cache_dir` you pass, else `NOENTENC_CACHE`, else `~/.cache/noentenc`. Detection weights go directly under it and translation weights under `<root>/hub`, in the Hugging Face cache layout. If you set neither `cache_dir` nor `NOENTENC_CACHE`, translation weights stay in the Hugging Face cache (`HF_HUB_CACHE` or `HF_HOME`), as in earlier releases, so models you already downloaded are reused. If you start setting `NOENTENC_CACHE`, translation models download once more into the new location.
+One directory holds both kinds of weights. The cache root is the `cache_dir` you pass, else `NOENTENC_CACHE`, else `~/.cache/noentenc`. Detection weights go directly under it and translation weights under `<root>/hub`, in the Hugging Face cache layout.
 
 Downloads show a progress bar (`TQDM_DISABLE=1` hides it). Detection downloads give up on a connection that stays silent for 30 seconds (`NOENTENC_DOWNLOAD_TIMEOUT` changes it), retry up to 4 times on timeouts, dropped connections and server errors, and resume where they stopped. Translation downloads use huggingface-hub, which has its own retries and its own `HF_HUB_DOWNLOAD_TIMEOUT`.
 

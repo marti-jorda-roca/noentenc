@@ -5,9 +5,9 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+from noentenc._cache import CACHE_ENV
 from noentenc.language_detection import Detection, DetectionStatus, LanguageDetector
 from noentenc.language_detection._content import count_letters, has_linguistic_content
-from noentenc.language_detection._download import CACHE_ENV
 from noentenc.language_detection.labels import LabelMapper
 from noentenc.language_detection.models.base import BaseModel
 from noentenc.language_detection.models.fasttext import FastTextModel

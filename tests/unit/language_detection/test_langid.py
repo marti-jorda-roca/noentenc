@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from noentenc.language_detection._download import CACHE_ENV
+from noentenc._cache import CACHE_ENV
 from noentenc.language_detection.models.langid_model import (
     LANGID_SDIST,
     MODEL_MEMBER,

@@ -43,7 +43,7 @@ def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_cache_root_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert cache_root() == tmp_path / "home" / ".cache" / "noentenc"
-    assert translation_cache() is None  # the Hugging Face default cache
+    assert translation_cache() == tmp_path / "home" / ".cache" / "noentenc" / "hub"
     monkeypatch.setenv("NOENTENC_CACHE", str(tmp_path / "env"))
     assert cache_root() == tmp_path / "env"
     assert translation_cache() == tmp_path / "env" / "hub"

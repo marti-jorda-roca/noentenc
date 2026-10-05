@@ -176,7 +176,8 @@ def translate_preserving(
         for i, (text, masked) in enumerate(zip(texts, masks, strict=True))
         if masked is None and find_literals(text)
     ]
-    first = [i for i in range(len(texts)) if i not in set(piecewise)]
+    skipped = set(piecewise)
+    first = [i for i in range(len(texts)) if i not in skipped]
     results: list[Translation | None] = [None] * len(texts)
     translated = translate([_model_input(texts[i], masks[i]) for i in first])
     for i, result in zip(first, translated, strict=True):

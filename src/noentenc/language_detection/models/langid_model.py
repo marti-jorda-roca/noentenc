@@ -20,7 +20,7 @@ import numpy as np
 
 from noentenc.language_detection._download import RemoteFile, fetch
 from noentenc.language_detection.labels import to_iso639_3
-from noentenc.language_detection.models.base import BaseModel
+from noentenc.language_detection.models.base import BaseModel, softmax
 
 LANGID_SDIST = RemoteFile(
     url="https://files.pythonhosted.org/packages/ea/4c/0fb7d900d3b0b9c8703be316fbddffecdab23c64e1b46c7a83561d78bd43/langid-1.1.6.tar.gz",
@@ -204,13 +204,13 @@ class LangidModel(BaseModel):
     def _predict_chunk(self, texts: list[str]) -> list[str]:
         scores = self._log_scores(texts)
         if not self._mapper.identity:
-            scores = self._mapper.reduce(_softmax(scores))
+            scores = self._mapper.reduce(softmax(scores))
         return self._mapper.top_label(scores.argmax(axis=1))
 
     def _predict_score_chunk(
         self, texts: list[str], top_k: int | None
     ) -> list[dict[str, float]]:
-        probs = self._mapper.reduce(_softmax(self._log_scores(texts)))
+        probs = self._mapper.reduce(softmax(self._log_scores(texts)))
         return self._mapper.to_dicts(probs, top_k)
 
 
@@ -263,8 +263,3 @@ def _state_log_prob(weights: LangidWeights) -> np.ndarray:
                 axis=0, dtype=np.float64
             )
     return out
-
-
-def _softmax(logits: np.ndarray) -> np.ndarray:
-    z = np.exp(logits - logits.max(axis=1, keepdims=True))
-    return z / z.sum(axis=1, keepdims=True)

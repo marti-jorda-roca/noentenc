@@ -20,12 +20,10 @@ from typing import IO, TYPE_CHECKING
 
 from tqdm import tqdm
 
-from noentenc._cache import CACHE_ENV, cache_root
+from noentenc._cache import cache_root
 
 if TYPE_CHECKING:
     from http.client import HTTPResponse
-
-__all__ = ["CACHE_ENV", "RemoteFile", "cache_dir", "fetch", "is_cached"]
 
 TIMEOUT_ENV = "NOENTENC_DOWNLOAD_TIMEOUT"
 DEFAULT_TIMEOUT = 30.0
@@ -58,13 +56,8 @@ class RemoteFile:
         )
 
 
-def cache_dir(root: str | Path | None = None) -> Path:
-    """The detection cache: ``root``, else ``NOENTENC_CACHE``, else ``~/.cache/noentenc``."""
-    return cache_root(root)
-
-
-def is_cached(remote: RemoteFile, root: str | Path | None = None) -> bool:
-    return (cache_dir(root) / remote.cache_path).is_file()
+def is_cached(remote: RemoteFile, cache_dir: str | Path | None = None) -> bool:
+    return (cache_root(cache_dir) / remote.cache_path).is_file()
 
 
 def fetch(

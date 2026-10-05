@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from noentenc._cache import cache_root
 from noentenc.language_detection import _download as download_module
-from noentenc.language_detection._download import RemoteFile, cache_dir, fetch
+from noentenc.language_detection._download import RemoteFile, fetch
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +29,7 @@ def test_fetch_downloads_once_and_caches(tmp_path: Path) -> None:
     src, sha = _source(tmp_path)
     remote = RemoteFile(url=src.as_uri(), cache_path="x/weights.bin", sha256=sha)
     path = fetch(remote)
-    assert path == cache_dir() / "x/weights.bin" and path.read_bytes() == b"weights"
+    assert path == cache_root() / "x/weights.bin" and path.read_bytes() == b"weights"
     src.unlink()
     assert fetch(remote) == path  # served from cache
 
@@ -46,7 +47,7 @@ def test_checksum_mismatch_leaves_nothing_behind(tmp_path: Path) -> None:
     src, _ = _source(tmp_path)
     with pytest.raises(OSError, match="sha256 mismatch"):
         fetch(RemoteFile(url=src.as_uri(), cache_path="weights.bin", sha256="0" * 64))
-    assert list(cache_dir().iterdir()) == []
+    assert list(cache_root().iterdir()) == []
 
 
 def test_huggingface_urls_are_pinned() -> None:
@@ -69,7 +70,7 @@ def test_cache_dir_argument_overrides_the_environment(tmp_path: Path) -> None:
     remote = RemoteFile(url=src.as_uri(), cache_path="x/weights.bin", sha256=sha)
     path = fetch(remote, cache_dir=tmp_path / "other")
     assert path == tmp_path / "other" / "x" / "weights.bin"
-    assert not (cache_dir() / "x").exists()
+    assert not (cache_root() / "x").exists()
 
 
 def test_force_and_verify_replace_a_corrupt_file(tmp_path: Path) -> None:
@@ -177,7 +178,7 @@ def test_permanent_failures_are_not_retried(
     with pytest.raises(OSError, match="failed after 1 attempt"):
         fetch(REMOTE)
     assert sleeps == []
-    assert list(cache_dir().iterdir()) == []
+    assert list(cache_root().iterdir()) == []
 
 
 def test_retries_are_bounded(
@@ -187,7 +188,7 @@ def test_retries_are_bounded(
     with pytest.raises(OSError, match="failed after 4 attempt"):
         fetch(REMOTE)
     assert len(sleeps) == 3
-    assert list(cache_dir().iterdir()) == []
+    assert list(cache_root().iterdir()) == []
 
 
 def test_a_stalled_download_resumes_where_it_stopped(

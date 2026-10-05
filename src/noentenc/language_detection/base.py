@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 from tqdm import tqdm
 
-from noentenc._batching import check_batch_size, check_texts
+from noentenc._batching import check_batch_size, check_int, check_texts
 from noentenc._catalog import DETECTION_FILE_SIZES
 from noentenc._dataframe import column_values, with_column
 from noentenc._plan import (
@@ -307,7 +307,7 @@ class LanguageDetector:
         With ``show_progress`` a tqdm bar tracks the rows inferred so far.
         """
         check_batch_size(batch_size)
-        _check_top_k(top_k)
+        check_int("top_k", top_k, optional=True)
         texts = [
             text if isinstance(text, str) else ""
             for text in column_values(dataset, target_column)
@@ -348,7 +348,7 @@ class LanguageDetector:
         detailed: bool,
     ) -> Any:  # noqa: ANN401 - the public overloads type each combination
         check_batch_size(batch_size)
-        _check_top_k(top_k)
+        check_int("top_k", top_k, optional=True)
         if with_score and detailed:
             raise ValueError("pass with_score or detailed, not both")
         if detailed:
@@ -383,12 +383,3 @@ class LanguageDetector:
         for i, text_scores in zip(pending, scores, strict=True):
             results[i] = self.policy.decide(text_scores)
         return results  # ty: ignore[invalid-return-type] - every slot is filled above
-
-
-def _check_top_k(top_k: object) -> None:
-    if top_k is None:
-        return
-    if isinstance(top_k, bool) or not isinstance(top_k, int):
-        raise TypeError(f"top_k must be an int or None, got {type(top_k).__name__}")
-    if top_k < 1:
-        raise ValueError(f"top_k must be >= 1 or None, got {top_k}")

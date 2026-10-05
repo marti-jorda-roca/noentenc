@@ -13,7 +13,7 @@ import numpy as np
 from noentenc._onnx import create_session, pad
 from noentenc._optional import ONNX_EXTRA, require
 from noentenc.language_detection._download import RemoteFile, fetch
-from noentenc.language_detection.models.base import BaseModel
+from noentenc.language_detection.models.base import BaseModel, softmax
 
 # Texts are cut before tokenizing at this many characters per token of `max_length`. Tokens
 # are a few characters long, so the cut almost always keeps more than `max_length` tokens.
@@ -191,7 +191,7 @@ class OnnxClassifierModel(BaseModel):
         return cast("np.ndarray", outputs[0])
 
     def _scores(self, texts: list[str]) -> np.ndarray:
-        return self._mapper.reduce(_softmax(self.logits(texts)))
+        return self._mapper.reduce(softmax(self.logits(texts)))
 
     def _predict_chunk(self, texts: list[str]) -> list[str]:
         return self._mapper.top_label(self._scores(texts).argmax(axis=1))
@@ -208,8 +208,3 @@ def _cut_at_space(text: str, limit: int) -> str:
         return text
     space = text.rfind(" ", limit // 2, limit)
     return text if space < 0 else text[:space]
-
-
-def _softmax(logits: np.ndarray) -> np.ndarray:
-    z = np.exp(logits - logits.max(axis=1, keepdims=True))
-    return z / z.sum(axis=1, keepdims=True)

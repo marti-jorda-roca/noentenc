@@ -2,8 +2,8 @@
 
 import pytest
 
-from noentenc.language_detection.labels import valid_iso639_3_codes
 from noentenc.language_detection.models.base import BaseModel
+from tests.unit.language_detection.helpers import valid_iso639_3_codes
 
 TEXTS = [
     "Bon dia a tothom, com esteu? Avui fa molt bon temps a Barcelona.",
