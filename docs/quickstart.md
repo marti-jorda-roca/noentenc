@@ -158,7 +158,7 @@ Limits:
 
 - Only the literals above are protected. Markdown emphasis (`**bold**`), lists and headings, and the text inside HTML tags, are translated like any other text, and a model may move or drop the markup around them.
 - Words can move across tags. German Opus-MT turns `Click <a>here</a> to…` into `Klicken Sie hier <a></a>, um…`. The tags are intact, but the link now wraps nothing.
-- Protected numbers keep their source format: `1,299.99` stays `1,299.99` in Spanish rather than becoming `1.299,99`.
+- Protected numbers keep their source format: `1,299.99` stays `1,299.99` in Spanish rather than becoming the locale's `1.299,99`. Without preservation it's no better: Opus-MT writes `1,299,99` or `1.299.99`, neither of which is correct.
 - This isn't a document translator. Long HTML or Markdown documents work best when you translate their text nodes yourself.
 
 [Benchmarks](benchmarks.md#literal-text) has how often each model keeps literals with and without preservation.
