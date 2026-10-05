@@ -96,14 +96,20 @@ translator.translate_batch(
 )
 # ['¿Dónde está la estación?', 'Me encanta esta ciudad.']
 
-# The source language is optional.
-translator.translate("Bon dia a tothom!", Language.ENGLISH)
-# 'Good day to everyone!'
+# A mixed-language inbox: detect each text's language and translate in one call.
+translator.translate_batch(
+    ["Hola, ¿cuándo llega mi pedido?", "Der Link funktioniert nicht.", "Thanks!"],
+    "en",
+    "auto",
+)
+# ['Hey, when does my order arrive?', "The link doesn't work.", 'Thanks!']
 
-translator.translate_dataset(df, "review", "review_en", Language.ENGLISH)
+translator.translate_dataset(df, "review", "review_en", "en", "auto")
 ```
 
-`Translator()` picks the lightest model for each pair. It uses a dedicated Opus-MT model when one exists for the direction (66 directions, about 75M parameters each). For any other pair it uses SMaLL-100, which covers 100 languages. Languages are always `Language` enum members, so a typo fails at the call site, and a model that can't handle a pair raises `UnsupportedLanguageError`.
+`Translator()` picks the lightest model for each pair. It uses a dedicated Opus-MT model when one exists for the direction (66 directions, about 75M parameters each). For any other pair it uses SMaLL-100, which covers 100 languages. A model that can't handle a pair raises `UnsupportedLanguageError`. Languages are `Language` members or codes and names: `"es"`, `"spa"`, `"es-ES"` and `"spanish"` all mean Spanish. `noentenc.to_language()` does that conversion on its own, which also turns detector labels like `"spa"` or `"cmn"` into `Language` members.
+
+`source_language="auto"` detects each text's language, groups the texts by language and translates each group with the model for that pair, then returns them in input order. Texts already in the target language and texts without linguistic content come back unchanged. When the detector isn't sure (`lol`, a name), the text is kept as given with status `unknown_source`. `unknown_source="fallback"` translates such texts without a source language instead, and `unknown_source="raise"` fails the call. `detailed=True` reports each text's detected language, score, status and model. Without a source language, `Translator` can't pick an Opus-MT model, so it uses SMaLL-100 for every text.
 
 Text of any length works. It is split into sentences, they are translated in one batch, and the translations are joined back with the original spaces, line breaks and blank lines. A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` instead of being cut silently. Pass `truncate=True` to translate only its start, and `detailed=True` to get a `Translation` that says whether input was dropped (`input_truncated`) or the output hit its length limit (`output_limit_reached`).
 
@@ -138,7 +144,7 @@ On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 
 |---|---|
 | [detect_dataset.py](docs/examples/detect_dataset.py) | Tag a DataFrame column and keep only confident English rows. |
 | [conservative_detection.py](docs/examples/conservative_detection.py) | Abstain on names, chat tokens and links instead of guessing, and restrict the candidate languages. |
-| [translate_to_english.py](docs/examples/translate_to_english.py) | Detect each message's language, then batch-translate everything into English. |
+| [translate_to_english.py](docs/examples/translate_to_english.py) | Translate a mixed-language inbox and DataFrame into English in one call with `source_language="auto"`. |
 | [choose_detection_backend.py](docs/examples/choose_detection_backend.py) | Swap backends, restrict candidate languages, collapse macrolanguages. |
 | [choose_translation_model.py](docs/examples/choose_translation_model.py) | Pick a model, precision and thread count, and run offline. |
 | [prepare_offline.py](docs/examples/prepare_offline.py) | Download a profile's weights into one directory, then detect and translate without network access. |

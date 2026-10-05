@@ -1,5 +1,5 @@
 from noentenc.profiles import Profile
-from noentenc.translation.base import Translator
+from noentenc.translation.base import SourceLanguageError, Translator
 from noentenc.translation.models._seq2seq import Precision
 from noentenc.translation.models.base import (
     InputTooLongError,
@@ -20,6 +20,7 @@ __all__ = [
     "Precision",
     "Profile",
     "SMaLL100Model",
+    "SourceLanguageError",
     "Translation",
     "TranslationStatus",
     "Translator",

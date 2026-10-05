@@ -73,7 +73,7 @@ translator.translate("The weather is nice today.", Language.SPANISH, Language.EN
 # 'El tiempo es bueno hoy.'
 ```
 
-The arguments are the text, the target language and the source language, in that order. Languages are always `Language` enum members, so a typo fails where you wrote it instead of deep inside a model.
+The arguments are the text, the target language and the source language, in that order. Languages are `Language` members, or codes and names that mean one: `"es"`, `"spa"`, `"es-ES"` and `"spanish"` all work. An unknown one raises `UnsupportedLanguageError` before any model loads.
 
 The source language is optional.
 
@@ -157,23 +157,42 @@ df = translator.translate_dataset(
 
 ## Detect, then translate
 
-The detector returns ISO 639-3 codes (`deu`), but `Language` values use ISO 639-1 where a two-letter code exists (`de`). Build a lookup once with `to_iso639_3`.
+For a mixed-language inbox, pass `source_language="auto"`. Each text's language is detected, and texts in the same language go through the right model together. Results come back in input order.
 
 ```python
-from noentenc import Language
-from noentenc.language_detection import LanguageDetector, to_iso639_3
-from noentenc.translation import Translator
-
-BY_ISO639_3 = {to_iso639_3(language): language for language in Language}
-
-text = "Der Link im Newsletter funktioniert nicht."
-source = BY_ISO639_3.get(LanguageDetector().detect(text))  # Language.GERMAN
-
-if source is not None:
-    print(Translator().translate(text, Language.ENGLISH, source))
+messages = [
+    "Hola, ¿cuándo llega mi pedido?",
+    "Der Link im Newsletter funktioniert nicht.",
+    "Thanks, the issue is fixed now.",
+    "lol",
+]
+translator.translate_batch(messages, Language.ENGLISH, "auto")
+# ['Hey, when does my order arrive?', 'The link in the newsletter does not work.',
+#  'Thanks, the issue is fixed now.', 'lol']
 ```
 
-`.get` returns `None` for `und` and for languages no translation model covers, so check before translating. [translate_to_english.py](examples/translate_to_english.py) does this for a whole inbox, grouping texts by language so each group goes through the model in one batch.
+- Pairs with an Opus-MT model use it, and the other languages use the profile's fallback (SMaLL-100 for `speed`).
+- Texts already in the target language, blank texts, and texts without linguistic content (a bare link, emoji) come back unchanged, without a model.
+- The detector is the profile's `LanguageDetector`, set to abstain with `min_letters=4, min_score=0.5`. When it can't tell the language, the text comes back as given with status `unknown_source`. If it detects a language no model translates into the target, the status is `unsupported_source`. Pass `unknown_source="fallback"` to translate those texts without a source language, or `unknown_source="raise"` to fail the call before anything is translated. To use other thresholds or another backend, pass `Translator(detector=LanguageDetector(...))`.
+- `detailed=True` gives each text's `source_language`, `detected_language`, `detection_score`, `status` and `model`.
+- Each model loads once per call and respects `max_loaded_models`, including in `translate_dataset`, which also takes `status_column=` and `source_column=`.
+
+```python
+df = translator.translate_dataset(
+    df, "message", "english", Language.ENGLISH, "auto", status_column="status"
+)
+```
+
+`noentenc.prepare(translation=[("auto", "en")])` downloads every model that can be needed for a target, for running offline. [translate_to_english.py](examples/translate_to_english.py) runs a whole inbox and a DataFrame.
+
+To map a detector label to a `Language` yourself, use `to_language`. It accepts ISO 639-1 and 639-3 codes, BCP-47 tags and English names. It folds individual languages into their macrolanguage when only that is supported, so `"cmn"` becomes `Language.CHINESE` and `"nob"` becomes `Language.NORWEGIAN`.
+
+```python
+from noentenc import to_language
+
+to_language("deu")  # Language.GERMAN
+to_language("und", None)  # None instead of UnsupportedLanguageError
+```
 
 ## Trade speed for quality
 

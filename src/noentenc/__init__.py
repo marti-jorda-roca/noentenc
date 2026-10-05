@@ -5,6 +5,7 @@ from noentenc.languages import (
     Language,
     LanguageSchema,
     UnsupportedLanguageError,
+    to_language,
 )
 from noentenc.profiles import Profile
 
@@ -18,6 +19,7 @@ __all__ = [
     "Profile",
     "UnsupportedLanguageError",
     "prepare",
+    "to_language",
 ]
 
 

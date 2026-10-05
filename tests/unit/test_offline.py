@@ -178,5 +178,5 @@ def test_prepare_without_detection(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_prepare_rejects_unknown_profiles_and_pairs() -> None:
     with pytest.raises(ValueError, match="'fast' is not a valid Profile"):
         noentenc.prepare("fast")
-    with pytest.raises(ValueError, match="'xx' is not a valid Language"):
+    with pytest.raises(ValueError, match="'xx' is not a language"):
         noentenc.prepare(detection=False, translation=[("xx", "en")])
