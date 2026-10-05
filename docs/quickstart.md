@@ -23,7 +23,7 @@ detector.detect("Bon dia! Com estàs?")
 # 'cat'
 ```
 
-`LanguageDetector()` uses fastText lid.176, which knows 176 languages and weighs 0.9 MB. It returns ISO 639-3 codes like `eng`, `spa` and `cat`. Empty and whitespace-only texts return `und` (undetermined).
+`LanguageDetector()` uses fastText lid.176, which knows 176 languages and weighs 0.9 MB. It returns ISO 639-3 codes like `eng`, `spa` and `cat`. Empty and whitespace-only texts return `und` (undetermined). Texts without letters outside URLs and email addresses (digits, emoji, punctuation, a bare link) return `zxx` (no linguistic content). Neither runs the model.
 
 To see how sure the model is, ask for scores. `top_k` sets how many candidates come back.
 
@@ -38,6 +38,28 @@ For many texts, pass a list to `detect_batch`.
 detector.detect_batch(["Hello there", "Hola, ¿qué tal?", "你好", ""])
 # ['eng', 'spa', 'zho', 'und']
 ```
+
+### Abstain when unsure
+
+Any other text gets the model's best guess, however unsure it is: `lol` comes back as `eng` and `Hans Müller` as `deu`. To route only confident detections, set thresholds. A text that misses one gets `und`, and `detailed=True` says why.
+
+```python
+detector = LanguageDetector(min_letters=4, min_score=0.5)
+
+detector.detect("lol", detailed=True).status  # DetectionStatus.INSUFFICIENT_TEXT
+
+detection = detector.detect("Hans Müller", detailed=True)
+detection.language, detection.status  # ('und', DetectionStatus.LOW_CONFIDENCE)
+detection.top_language, detection.score  # ('deu', 0.35): the guess it didn't trust
+```
+
+- `min_letters`: fewer letters than this (URLs and emails don't count) is `insufficient_text`. The model doesn't run.
+- `min_score`: a top score below this is `low_confidence`.
+- `min_margin`: a top score less than this above the runner-up is `ambiguous`.
+
+Scores aren't probabilities you can compare across backends, so pick thresholds per backend. [Benchmarks](benchmarks.md#conservative-detection) has tested settings with their wrong-label and abstention rates. `detect_dataset` writes each row's status to `status_column=` if you pass one.
+
+If you know which languages to expect, `candidates=["eng", "spa", "cat"]` makes the detector answer one of them. It works with the fastText, ONNX, langid and lingua backends; CLD3 and heliport raise, because they don't score every language.
 
 ## Translate
 

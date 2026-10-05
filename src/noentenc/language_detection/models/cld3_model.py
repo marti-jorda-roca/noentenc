@@ -22,6 +22,8 @@ class Cld3Model(BaseModel):
     not a distribution over all languages and don't sum to 1.
     """
 
+    scores_every_label = False
+
     def __init__(
         self,
         model: str = "cld3",

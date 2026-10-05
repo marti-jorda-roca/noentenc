@@ -49,6 +49,41 @@ Both return the same labels and scores as the reference `fasttext` and `langid` 
 - **For short texts in a known set of languages, use `LinguaModel(languages=[...])`.** It's slower, but restricting the candidates helps where n-gram models struggle.
 - **`heliport` is the fastest**, but it's GPL-3.0 and has no Windows wheel.
 
+## Conservative detection
+
+`LanguageDetector(min_letters=..., min_score=..., min_margin=...)` returns `und` instead of a guess when a text misses a threshold. These rates come from `scripts/evaluate_detection.py`, run on the 126 hand-labelled cases in `scripts/data/detection_cases.tsv`:
+
+- 92 texts with a language: 40 short support messages in 15 languages, 17 messages with typos, 19 sentences in closely related languages (Catalan/Spanish, Galician/Portuguese, Danish/Norwegian/Swedish, Czech/Slovak, Croatian/Serbian, Indonesian/Malay, Ukrainian/Russian, Afrikaans/Dutch), 8 mixed-language messages where either language counts, and 8 paragraphs.
+- 20 texts a conservative router should skip: 10 people's names and 10 chat tokens such as `lol`, `ok` and `xD`.
+- 14 nonlinguistic texts: numbers, emoji, punctuation, URLs and email addresses.
+
+**Right**, **Wrong** and **Abstained** are shares of the 92 texts with a language. **Skipped** is the share of the 20 names and chat tokens that got `und` or `zxx`. Labels are compared with macrolanguages collapsed. All 14 nonlinguistic texts get `zxx` under every setting, without running the model; before this rule they all got a language label.
+
+| Backend | Setting | Right | Wrong | Abstained | Skipped |
+|---|---|---:|---:|---:|---:|
+| `lid176` | default | 97% | 3% | 0% | 0% |
+| | `min_letters=4, min_score=0.5` (tested) | 92% | 2% | 5% | 90% |
+| | `min_score=0.7` | 84% | 1% | 15% | 100% |
+| `langid` | default | 92% | 8% | 0% | 0% |
+| | `min_letters=4, min_score=0.7` (tested) | 89% | 4% | 7% | 85% |
+| `bert-openlid` | default | 91% | 9% | 0% | 0% |
+| | `min_score=0.7` (tested) | 82% | 2% | 16% | 95% |
+| `lingua` | default | 92% | 8% | 0% | 0% |
+| | `min_margin=0.1` (tested) | 85% | 1% | 14% | 70% |
+| | `min_score=0.5` | 66% | 1% | 33% | 90% |
+| `cld3` | default | 87% | 13% | 0% | 0% |
+| | `min_letters=4, min_score=0.7` (tested) | 80% | 4% | 15% | 65% |
+| `heliport` | default | 98% | 2% | 0% | 35% |
+| | `min_letters=4, min_score=0.3` (tested) | 93% | 0% | 7% | 85% |
+
+- **`min_letters=4` alone skips most chat tokens** (`lol`, `ok`, `xD`) at no cost to real messages, and it saves the model call. It doesn't catch names.
+- **A score threshold catches names**, which score low on most backends. The tested setting cuts wrong labels by a third on `lid176` and by half or more on the others, and skips 85 to 95% of names and chat tokens. CLD3 is the exception: it's confident about too many names.
+- **lingua's scores are relative**, so it abstains much more at the same `min_score` than the other backends. A small `min_margin` suits it better.
+- **heliport's confidences run from 0 to about 2.5**, not 0 to 1, so its thresholds are lower.
+- `openlid-v3` and `glotlid` weren't evaluated here. Their softmax scores behave like `bert-openlid`'s, but evaluate them with `--backends openlid-v3 glotlid` before you pick a threshold.
+
+The cases are few and hand-picked, so treat the rates as a guide to the trade-off, not as accuracy figures. To evaluate on your own messages, add rows to the TSV and rerun the script; `--by-category` breaks the rates down.
+
 ## Against the original implementations
 
 How many times faster noentenc is than each model's usual package, on the same texts and laptop (below 1× means the original is faster):
