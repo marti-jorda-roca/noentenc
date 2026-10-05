@@ -6,6 +6,7 @@ from typing import ClassVar
 
 from tokenizers import Tokenizer
 
+from noentenc._batching import check_batch_size
 from noentenc._onnx import pad
 from noentenc.languages import Language
 from noentenc.translation._segment import split_sentences
@@ -130,6 +131,7 @@ class Seq2SeqModel(BaseModel):
         A sentence longer than the model reads raises `InputTooLongError`, or with
         `truncate` loses its end. `batch_size` counts sentences.
         """
+        check_batch_size(batch_size)
         target = Language(target_language)
         source = None if source_language is None else Language(source_language)
         self.schema.validate(source, target, type(self).__name__)

@@ -255,6 +255,14 @@ def test_empty_batch(m2m_dir: Path) -> None:
     assert SMaLL100Model(m2m_dir).predict_batch([], EN) == []
 
 
+@pytest.mark.parametrize("batch_size", [0, -1])
+def test_batch_size_below_one_is_rejected(m2m_dir: Path, batch_size: int) -> None:
+    # A negative step used to skip inference and decode empty translations.
+    with pytest.raises(ValueError, match="batch_size must be >= 1"):
+        SMaLL100Model(m2m_dir).predict_batch(["hello"], EN, batch_size=batch_size)
+    assert FakeEngine.calls == []
+
+
 def test_spm_charsmap_is_read_from_model_proto() -> None:
     charsmap = b"\x01\x02\x03"
     normalizer_spec = (

@@ -131,9 +131,9 @@ translator = Translator(MyServiceModel(client))
 ```
 
 - **`schema` lists what the model reads (`source`) and writes (`target`).** Use `ANY_LANGUAGE` for an unrestricted side. If `source` is a set of more than one language, `validate` makes the source language required.
-- **Call `self.schema.validate(...)` first in `predict_batch`.** It raises `UnsupportedLanguageError` for a language the model can't handle, so nothing gets silently mistranslated. `Translator` doesn't check this for you when you pass a model.
+- **Call `self.schema.validate(...)` first in `predict_batch`.** It raises `UnsupportedLanguageError` for a language the model can't handle, so nothing gets silently mistranslated. `Translator` also checks it before calling you, but direct calls to your model don't go through `Translator`.
 - **Languages are always `Language` enum members, never free strings.** `str(Language.SPANISH)` is `"es"` (ISO 639-1, or 639-3 when there's no 639-1 code). Map it to whatever codes your service expects.
-- **Return translations in input order, one per text.** `Translator.translate_dataset` skips null cells before it calls you.
+- **Return translations in input order, one per text.** `Translator` never passes you an empty batch, blank texts, a same-language request or (in `translate_dataset`) null cells.
 - **Optionally override `predict_batch_detailed`** to report dropped input or cut-short output in a `Translation`, and to honour `truncate`. The default wraps `predict_batch` and reports nothing missing. `Translator` passes your model whole texts; split them yourself if your model only handles short input.
 
 ## 4. A new ONNX encoder-decoder translation model

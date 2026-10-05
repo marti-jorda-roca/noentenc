@@ -97,6 +97,30 @@ result.output_limit_reached  # True if the output may be cut short
 
 `translate_batch` takes the same `truncate` and `detailed` arguments, and `translate_dataset` takes `truncate`.
 
+Blank texts, and texts whose source language is already the target, come back unchanged without loading a model. Their detailed status is `unchanged`.
+
+### Keep going past bad rows
+
+By default the first text that fails to translate raises, which suits scripts you watch. For bulk jobs pass `errors="record"`. A text that fails comes back as given with status `failed` and the error message, and the rest of the batch is still translated. Errors that apply to the whole call still raise: an invalid `batch_size`, an unknown language or an unsupported pair.
+
+```python
+from noentenc.translation import TranslationStatus
+
+results = translator.translate_batch(
+    texts, Language.ENGLISH, Language.SPANISH, detailed=True, errors="record"
+)
+failed = {
+    i: result.error
+    for i, result in enumerate(results)
+    if result.status is TranslationStatus.FAILED
+}
+
+df = translator.translate_dataset(
+    df, "text", "text_en", Language.ENGLISH, errors="record", error_column="error"
+)
+# Failed rows have a null "text_en" and the message in "error".
+```
+
 ## Detect, then translate
 
 The detector returns ISO 639-3 codes (`deu`), but `Language` values use ISO 639-1 where a two-letter code exists (`de`). Build a lookup once with `to_iso639_3`.

@@ -54,9 +54,42 @@ def test_detect_and_batch(detector: LanguageDetector) -> None:
     assert sum(batch_scores[0].values()) == pytest.approx(1.0, abs=1e-5)
 
 
-def test_invalid_batch_size(detector: LanguageDetector) -> None:
-    with pytest.raises(ValueError, match="batch_size"):
-        detector.detect_batch(["a"], batch_size=0)
+@pytest.mark.parametrize("batch_size", [0, -1, 2.5, "32", True])
+def test_invalid_batch_size(detector: LanguageDetector, batch_size: object) -> None:
+    frame = pl.DataFrame({"text": ["a"]})
+    for texts in (["a"], []):
+        with pytest.raises((TypeError, ValueError), match="batch_size"):
+            detector.detect_batch(texts, batch_size=batch_size)  # ty: ignore[invalid-argument-type]
+    with pytest.raises((TypeError, ValueError), match="batch_size"):
+        detector.detect_dataset(frame, "text", "lang", batch_size=batch_size)  # ty: ignore[no-matching-overload]
+    with pytest.raises((TypeError, ValueError), match="batch_size"):
+        detector.model.predict_batch(["a"], batch_size=batch_size)  # ty: ignore[invalid-argument-type]
+
+
+@pytest.mark.parametrize("top_k", [0, -1, 1.5])
+def test_invalid_top_k(detector: LanguageDetector, top_k: object) -> None:
+    frame = pl.DataFrame({"text": ["a"]})
+    with pytest.raises((TypeError, ValueError), match="top_k"):
+        detector.detect("a", with_score=True, top_k=top_k)  # ty: ignore[no-matching-overload]
+    with pytest.raises((TypeError, ValueError), match="top_k"):
+        detector.detect_batch(["a"], with_score=True, top_k=top_k)  # ty: ignore[no-matching-overload]
+    with pytest.raises((TypeError, ValueError), match="top_k"):
+        detector.detect_dataset(frame, "text", "lang", with_score=True, top_k=top_k)  # ty: ignore[no-matching-overload]
+
+
+def test_invalid_texts(detector: LanguageDetector) -> None:
+    with pytest.raises(TypeError, match="texts must be a list"):
+        detector.detect_batch("hello")  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match=r"texts\[1\] must be a string, got int"):
+        detector.detect_batch(["a", 1])  # ty: ignore[invalid-argument-type]
+
+
+def test_empty_and_blank_batches(detector: LanguageDetector) -> None:
+    assert detector.detect_batch([]) == []
+    assert detector.detect_batch([], with_score=True) == []
+    assert detector.detect_batch(["", " \n"]) == ["und", "und"]
+    empty = pl.DataFrame({"text": []}, schema={"text": pl.String})
+    assert detector.detect_dataset(empty, "text", "lang")["lang"].to_list() == []
 
 
 def test_batching_does_not_change_results(
