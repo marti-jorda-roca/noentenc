@@ -44,4 +44,4 @@ print(result.input_truncated, result.output_limit_reached)  # False False
 # translate_batch takes the same arguments, and translate_dataset takes truncate=,
 # so one oversized row doesn't stop a whole DataFrame.
 short, long = translator.translate_batch(["Hello.", run_on], ES, EN, truncate=True)
-print(short, long[:40])  # Hola. el tiempo es agradable el tiempo es ag
+print(short, long[:40])  # Hola. el tiempo es agradable el tiempo es agra
