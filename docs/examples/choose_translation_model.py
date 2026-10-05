@@ -43,6 +43,7 @@ except UnsupportedLanguageError as error:
 df = pd.DataFrame({"title": ["Summer sale", None, "Free shipping over 50 €"]})
 print(opus.translate_dataset(df, "title", "title_es", ES))
 
-# 5. Air-gapped servers: download once, then refuse to touch the network.
+# 5. Air-gapped servers: download ahead of time (OpusMTModel.download(...) or
+#    noentenc.prepare(...)), then refuse to touch the network.
 offline = OpusMTModel.from_pair(EN, ES, only_local_files=True)
 # NLLBModel() (200 languages) is also available, but it is CC-BY-NC-4.0: non-commercial only.

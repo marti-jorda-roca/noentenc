@@ -311,7 +311,10 @@ def test_downloads_are_pinned(
     calls: list[tuple[str | Path, str | None]] = []
 
     def fake_resolve(
-        model: str | Path, *_args: object, revision: str | None = None
+        model: str | Path,
+        *_args: object,
+        revision: str | None = None,
+        **_kwargs: object,
     ) -> dict[str, Path]:
         calls.append((model, revision))
         raise StopIteration

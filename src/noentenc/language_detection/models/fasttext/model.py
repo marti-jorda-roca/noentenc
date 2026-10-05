@@ -129,6 +129,8 @@ class FastTextModel(BaseModel):
     ``cache_size`` is how many distinct words keep their summed input rows in memory
     (``dim + 1`` floats each: 68 bytes for lid176, 1 KB for the 256-dim models), so repeated
     words skip tokenization. ``None`` keeps every word, ``0`` none.
+
+    Presets download into ``cache_dir`` (see ``noentenc._cache`` for the default).
     """
 
     def __init__(
@@ -138,11 +140,13 @@ class FastTextModel(BaseModel):
         normalize_labels: bool = True,
         collapse_macrolanguages: bool = False,
         cache_size: int | None = 1 << 17,
+        *,
+        cache_dir: str | Path | None = None,
     ) -> None:
         super().__init__(
             model, only_local_files, normalize_labels, collapse_macrolanguages
         )
-        weights = ftz.load(self._resolve(model, only_local_files))
+        weights = ftz.load(self._resolve(model, only_local_files, cache_dir))
         self.args = weights.args
         self.native_labels = weights.labels
         self._tokenizer = Tokenizer(weights, cache_size=cache_size)
@@ -158,9 +162,24 @@ class FastTextModel(BaseModel):
             self._hs_paths = np.concatenate((right, left), axis=0)
 
     @staticmethod
-    def _resolve(model: str | Path, only_local_files: bool) -> Path:
+    def remote_files(preset: str) -> list[RemoteFile]:
+        """The files a preset downloads."""
+        if preset not in PRESETS:
+            raise ValueError(
+                f"unknown fastText preset {preset!r}; presets: {', '.join(PRESETS)}"
+            )
+        return [PRESETS[preset].remote]
+
+    @staticmethod
+    def _resolve(
+        model: str | Path, only_local_files: bool, cache_dir: str | Path | None
+    ) -> Path:
         if isinstance(model, str) and model in PRESETS:
-            return fetch(PRESETS[model].remote, only_local_files=only_local_files)
+            return fetch(
+                PRESETS[model].remote,
+                only_local_files=only_local_files,
+                cache_dir=cache_dir,
+            )
         path = Path(model)
         if not path.is_file():
             raise FileNotFoundError(

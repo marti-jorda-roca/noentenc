@@ -232,6 +232,7 @@ class NLLBModel(Seq2SeqModel):
         revision: str | None = None,
         precision: Precision | str | None = None,
         num_threads: int | None = None,
+        cache_dir: str | Path | None = None,
     ) -> None:
         warnings.warn(
             "NLLB-200 is licensed CC-BY-NC-4.0: non-commercial use only.",
@@ -244,6 +245,7 @@ class NLLBModel(Seq2SeqModel):
             revision=revision,
             precision=precision,
             num_threads=num_threads,
+            cache_dir=cache_dir,
         )
 
     def _language_id(self, language: Language) -> int:
