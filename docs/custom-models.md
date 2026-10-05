@@ -134,10 +134,11 @@ translator = Translator(MyServiceModel(client))
 - **Call `self.schema.validate(...)` first in `predict_batch`.** It raises `UnsupportedLanguageError` for a language the model can't handle, so nothing gets silently mistranslated. `Translator` doesn't check this for you when you pass a model.
 - **Languages are always `Language` enum members, never free strings.** `str(Language.SPANISH)` is `"es"` (ISO 639-1, or 639-3 when there's no 639-1 code). Map it to whatever codes your service expects.
 - **Return translations in input order, one per text.** `Translator.translate_dataset` skips null cells before it calls you.
+- **Optionally override `predict_batch_detailed`** to report dropped input or cut-short output in a `Translation`, and to honour `truncate`. The default wraps `predict_batch` and reports nothing missing. `Translator` passes your model whole texts; split them yourself if your model only handles short input.
 
 ## 4. A new ONNX encoder-decoder translation model
 
-Opus-MT, M2M100, SMaLL-100 and NLLB all subclass `Seq2SeqModel`, which tokenizes, encodes, runs a greedy decode with a KV cache and detokenizes. It reads the model's `config.json` for the special token ids and maximum length. A new encoder-decoder family that has an ONNX export (for example one of the `Xenova/*` or `onnx-community/*` repos) usually needs about 30 lines. The class says where the files are and how language tokens wrap the input.
+Opus-MT, M2M100, SMaLL-100 and NLLB all subclass `Seq2SeqModel`, which splits text into sentences, tokenizes, encodes, runs a greedy decode with a KV cache, detokenizes and joins the sentences back together. It reads the model's `config.json` for the special token ids and maximum length. A new encoder-decoder family that has an ONNX export (for example one of the `Xenova/*` or `onnx-community/*` repos) usually needs about 30 lines. The class says where the files are and how language tokens wrap the input.
 
 A sketch for mBART-50, which puts the source language token first and forces the target language token as the first generated token:
 

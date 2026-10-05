@@ -11,7 +11,7 @@ from noentenc.languages import (
 from noentenc.profiles import Profile
 from noentenc.translation import base as translator_module
 from noentenc.translation.base import Translator
-from noentenc.translation.models.base import BaseModel
+from noentenc.translation.models.base import BaseModel, Translation
 from noentenc.translation.models.nllb import NLLBModel
 from noentenc.translation.models.small100 import SMaLL100Model
 
@@ -74,6 +74,41 @@ def test_translate_dataset_skips_nulls_in_model_calls(translator: Translator) ->
 def test_translate_dataset_rejects_other_types(translator: Translator) -> None:
     with pytest.raises(TypeError, match="polars or pandas"):
         translator.translate_dataset({"text": ["a"]}, "text", "out", EN)  # ty: ignore[no-matching-overload]
+
+
+def test_detailed_results_default_to_nothing_missing(translator: Translator) -> None:
+    assert translator.translate("hola", EN, detailed=True) == Translation("HOLA:en")
+    assert translator.translate_batch(["a"], ES, detailed=True) == [Translation("A:es")]
+
+
+class TruncatingModel(UpperModel):
+    """Reports every text as truncated when asked to truncate."""
+
+    def predict_batch_detailed(
+        self,
+        texts: list[str],
+        target_language: Language,
+        source_language: Language | None = None,
+        batch_size: int = 32,
+        *,
+        truncate: bool = False,
+    ) -> list[Translation]:
+        return [
+            Translation(text, input_truncated=truncate)
+            for text in self.predict_batch(texts, target_language, source_language)
+        ]
+
+
+def test_truncate_reaches_the_model() -> None:
+    translator = Translator(TruncatingModel())
+    assert translator.translate("a", EN) == "A:en"
+    assert translator.translate("a", EN, detailed=True).input_truncated is False
+    assert translator.translate("a", EN, truncate=True, detailed=True).input_truncated
+    (result,) = translator.translate_batch(["a"], EN, truncate=True, detailed=True)
+    assert result.input_truncated
+    frame = pl.DataFrame({"text": ["a"]})
+    out = translator.translate_dataset(frame, "text", "out", EN, truncate=True)
+    assert out["out"].to_list() == ["A:en"]
 
 
 class FakeOpus(UpperModel):
