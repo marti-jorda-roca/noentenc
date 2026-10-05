@@ -107,6 +107,8 @@ translator.translate_dataset(df, "review", "review_en", Language.ENGLISH)
 
 Text of any length works. It is split into sentences, they are translated in one batch, and the translations are joined back with the original spaces, line breaks and blank lines. A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` instead of being cut silently. Pass `truncate=True` to translate only its start, and `detailed=True` to get a `Translation` that says whether input was dropped (`input_truncated`) or the output hit its length limit (`output_limit_reached`).
 
+`Translator` keeps the models it loads for later calls, at most two at a time by default. A loaded model needs a lot more RAM than its download: about 1.1 GB for an Opus-MT pair at q4 and 1.15 GB for SMaLL-100. Pass `max_loaded_models=` to change the limit (`None` for no limit), and call `translator.unload()` to free them all. See [memory](docs/benchmarks.md#memory).
+
 For bulk jobs, `errors="record"` keeps going past a text that fails. That text comes back as given, with its status and error in the detailed result (or in an `error_column` for `translate_dataset`), and the rest are still translated. Empty batches, blank texts and same-language requests return without loading a model.
 
 ## Trade speed for quality

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import gc
+import weakref
+from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
 import polars as pl
 import pytest
@@ -369,3 +373,115 @@ def test_record_mode_in_datasets_keeps_nulls_and_alignment(
     assert translated == ["A:en", None, None, "", "B:en"]
     assert errors == [None, None, "InputTooLongError: too long: ['bad']", None, None]
     assert list(out["text"]) == list(frame["text"])
+
+
+# Bounded model cache.
+
+FR, DE = Language.FRENCH, Language.GERMAN
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_loaded_models_stay_within_the_limit() -> None:
+    translator = Translator(max_loaded_models=2)
+    for target in (ES, DE, FR):
+        assert translator.translate("hi", target, EN) == f"HI:{target}"
+    assert FakeOpus.created == [(EN, ES), (EN, DE), (EN, FR)]
+    assert len(translator.loaded_models) == 2
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_least_recently_used_model_is_evicted_and_reloaded() -> None:
+    translator = Translator(max_loaded_models=2)
+    translator.translate("hi", ES, EN)
+    translator.translate("hi", DE, EN)
+    translator.translate("hi", ES, EN)  # en->es is now the most recent
+    translator.translate("hi", FR, EN)  # evicts en->de
+    translator.translate("hi", ES, EN)  # still loaded
+    assert FakeOpus.created == [(EN, ES), (EN, DE), (EN, FR)]
+    translator.translate("hi", DE, EN)  # reloaded after eviction
+    assert FakeOpus.created[-1] == (EN, DE)
+    assert len(FakeOpus.created) == 4
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_no_limit_keeps_every_model() -> None:
+    translator = Translator(max_loaded_models=None)
+    for target in (ES, DE, FR):
+        translator.translate("hi", target, EN)
+    translator.translate("hi", ES)  # SMaLL-100
+    assert len(translator.loaded_models) == 4
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_unload_releases_models_and_reloads_on_demand() -> None:
+    translator = Translator()
+    translator.translate("hi", ES, EN)
+    (model,) = translator.loaded_models
+    released = weakref.ref(model)
+    del model
+    translator.unload()
+    assert translator.loaded_models == []
+    gc.collect()
+    assert released() is None
+    assert translator.translate("hi", ES, EN) == "HI:es"
+    assert FakeOpus.created == [(EN, ES), (EN, ES)]
+    translator.unload()
+    translator.unload()
+
+
+def test_explicit_model_is_not_cached_or_unloaded(translator: Translator) -> None:
+    assert translator.loaded_models == []
+    translator.unload()
+    assert translator.translate("hola", EN) == "HOLA:en"
+
+
+@pytest.mark.parametrize(
+    ("value", "error"),
+    [(0, ValueError), (-1, ValueError), (1.5, TypeError), (True, TypeError)],
+)
+def test_invalid_max_loaded_models(value: object, error: type[Exception]) -> None:
+    with pytest.raises(error, match="max_loaded_models"):
+        Translator(max_loaded_models=value)  # ty: ignore[invalid-argument-type]
+
+
+class UnloadingOpus(UpperModel):
+    """Unloads its translator in the middle of translating, like a concurrent eviction."""
+
+    translator: Translator
+
+    @classmethod
+    def from_pair(cls, source: Language, target: Language) -> UnloadingOpus:
+        return cls()
+
+    def predict_batch(
+        self,
+        texts: list[str],
+        target_language: Language,
+        source_language: Language | None = None,
+        batch_size: int = 32,
+    ) -> list[str]:
+        UnloadingOpus.translator.unload()
+        return super().predict_batch(texts, target_language, source_language)
+
+
+def test_eviction_does_not_break_a_call_in_flight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(translator_module, "OpusMTModel", UnloadingOpus)
+    translator = UnloadingOpus.translator = Translator(max_loaded_models=1)
+    assert translator.translate_batch(["a", "b"], ES, EN) == ["A:es", "B:es"]
+    assert translator.loaded_models == []
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_concurrent_calls_share_the_bounded_cache() -> None:
+    translator = Translator(max_loaded_models=1)
+    targets = [ES, DE, FR] * 10
+
+    def translate(target: Language) -> str:
+        return translator.translate("hi", target, EN)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(translate, targets))
+    assert results == [f"HI:{target}" for target in targets]
+    assert len(translator.loaded_models) <= 1
