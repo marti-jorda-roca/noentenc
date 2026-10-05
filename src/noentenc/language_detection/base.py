@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 from tqdm import tqdm
 
+from noentenc._batching import check_batch_size, check_texts
 from noentenc._dataframe import column_values, with_column
 from noentenc.language_detection.models.base import BaseModel
 from noentenc.language_detection.models.fasttext import FastTextModel
@@ -59,6 +60,7 @@ class LanguageDetector:
         self, text: str, with_score: bool = False, top_k: int | None = DEFAULT_TOP_K
     ) -> str | dict[str, float]:
         """The language of ``text``, or with ``with_score`` its ``top_k`` highest-scoring languages."""
+        _check_top_k(top_k)
         if with_score:
             return self.model.predict_score(text, top_k=top_k)
         return self.model.predict(text)
@@ -89,6 +91,10 @@ class LanguageDetector:
         with_score: bool = False,
         top_k: int | None = DEFAULT_TOP_K,
     ) -> list[str] | list[dict[str, float]]:
+        """The language of each of ``texts``, like ``detect``."""
+        check_texts(texts)
+        check_batch_size(batch_size)
+        _check_top_k(top_k)
         if with_score:
             return self.model.predict_batch_score(
                 texts, batch_size=batch_size, top_k=top_k
@@ -135,6 +141,8 @@ class LanguageDetector:
         sorted by score, which gives polars a fixed schema. Null texts get ``"und"``.
         With ``show_progress`` a tqdm bar tracks the rows inferred so far.
         """
+        check_batch_size(batch_size)
+        _check_top_k(top_k)
         texts = [
             text if isinstance(text, str) else ""
             for text in column_values(dataset, target_column)
@@ -157,3 +165,12 @@ class LanguageDetector:
                 for scores in results
             ]
         return with_column(dataset, result_column, results)
+
+
+def _check_top_k(top_k: object) -> None:
+    if top_k is None:
+        return
+    if isinstance(top_k, bool) or not isinstance(top_k, int):
+        raise TypeError(f"top_k must be an int or None, got {type(top_k).__name__}")
+    if top_k < 1:
+        raise ValueError(f"top_k must be >= 1 or None, got {top_k}")

@@ -3,11 +3,16 @@ from typing import TYPE_CHECKING, Literal, overload
 
 from tqdm import tqdm
 
+from noentenc._batching import check_batch_size, check_texts, is_blank
 from noentenc._dataframe import column_values, with_column
 from noentenc.languages import Language, UnsupportedLanguageError
 from noentenc.profiles import Profile
 from noentenc.translation.models._seq2seq import Precision, Seq2SeqModel
-from noentenc.translation.models.base import BaseModel, Translation
+from noentenc.translation.models.base import (
+    BaseModel,
+    Translation,
+    TranslationStatus,
+)
 from noentenc.translation.models.nllb import NLLBModel
 from noentenc.translation.models.opus_mt import OPUS_MT_PAIRS, OpusMTModel
 from noentenc.translation.models.small100 import SMaLL100Model
@@ -19,6 +24,9 @@ if TYPE_CHECKING:
 # What a candidate returns for a language pair: the cache key and loader of the model
 # it would use, or None when that model can't translate the pair.
 _Pick = tuple[Hashable, Callable[[], BaseModel]] | None
+
+# What to do when translating a text raises: raise it, or record it in the result.
+ErrorPolicy = Literal["raise", "record"]
 
 
 def _opus_mt(source: Language | None, target: Language) -> _Pick:
@@ -123,9 +131,12 @@ class Translator:
         A sentence longer than the model reads raises `InputTooLongError`; with
         `truncate` its end is dropped instead. With `detailed` the result is a
         `Translation`, which says whether input was dropped or output cut short.
+
+        Blank text, and text whose `source_language` is `target_language`, come back
+        unchanged without loading a model.
         """
         (translation,) = self._translate(
-            [text], target_language, source_language, 32, truncate
+            [text], target_language, source_language, 32, truncate, "raise"
         )
         return translation if detailed else translation.text
 
@@ -139,6 +150,7 @@ class Translator:
         *,
         truncate: bool = False,
         detailed: Literal[False] = False,
+        errors: ErrorPolicy = "raise",
     ) -> list[str]: ...
 
     @overload
@@ -151,6 +163,7 @@ class Translator:
         *,
         truncate: bool = False,
         detailed: Literal[True],
+        errors: ErrorPolicy = "raise",
     ) -> list[Translation]: ...
 
     def translate_batch(
@@ -162,10 +175,17 @@ class Translator:
         *,
         truncate: bool = False,
         detailed: bool = False,
+        errors: ErrorPolicy = "raise",
     ) -> list[str] | list[Translation]:
-        """Translate each of `texts`, like `translate`."""
+        """Translate each of `texts`, like `translate`.
+
+        An empty list returns at once. With `errors="record"` a text whose translation
+        raises comes back as given, and its detailed result has status `FAILED` and
+        the error; the other texts are still translated. Arguments that apply to the
+        whole call (batch size, languages, an unsupported pair) always raise.
+        """
         translations = self._translate(
-            texts, target_language, source_language, batch_size, truncate
+            texts, target_language, source_language, batch_size, truncate, errors
         )
         return translations if detailed else [t.text for t in translations]
 
@@ -181,6 +201,8 @@ class Translator:
         show_progress: bool = True,
         *,
         truncate: bool = False,
+        errors: ErrorPolicy = "raise",
+        error_column: str | None = None,
     ) -> pl.DataFrame: ...
 
     @overload
@@ -195,6 +217,8 @@ class Translator:
         show_progress: bool = True,
         *,
         truncate: bool = False,
+        errors: ErrorPolicy = "raise",
+        error_column: str | None = None,
     ) -> pd.DataFrame: ...
 
     def translate_dataset(
@@ -208,52 +232,88 @@ class Translator:
         show_progress: bool = True,
         *,
         truncate: bool = False,
+        errors: ErrorPolicy = "raise",
+        error_column: str | None = None,
     ) -> pl.DataFrame | pd.DataFrame:
         """Return `dataset` with `result_column` holding the translation of `target_column`.
 
         Works with polars and pandas frames; null texts stay null. Texts are translated
-        like `translate`, including `truncate`.
+        like `translate_batch`, including `truncate` and `errors`. With
+        `errors="record"` a row whose translation raises gets a null translation, and
+        its error in `error_column` if given (null for the other rows).
         With `show_progress` a tqdm bar tracks the rows translated so far.
         """
+        _check_arguments(target_language, source_language, batch_size, errors)
         values = column_values(dataset, target_column)
         rows = [i for i, value in enumerate(values) if isinstance(value, str)]
         texts = [values[i] for i in rows]
-        translations: list[str] = []
+        translations: list[Translation] = []
         with tqdm(
             total=len(texts), desc="Translating", disable=not show_progress
         ) as progress:
             for start in range(0, len(texts), batch_size):
                 chunk = texts[start : start + batch_size]
-                translations.extend(
-                    t.text
-                    for t in self._translate(
-                        chunk, target_language, source_language, batch_size, truncate
-                    )
+                translations += self._translate(
+                    chunk,
+                    target_language,
+                    source_language,
+                    batch_size,
+                    truncate,
+                    errors,
                 )
                 progress.update(len(chunk))
         results: list[str | None] = [None] * len(values)
+        failures: list[str | None] = [None] * len(values)
         for i, translation in zip(rows, translations, strict=True):
-            results[i] = translation
-        return with_column(dataset, result_column, results, strings=True)
+            if translation.status is TranslationStatus.FAILED:
+                failures[i] = translation.error
+            else:
+                results[i] = translation.text
+        dataset = with_column(dataset, result_column, results, strings=True)
+        if error_column is not None:
+            dataset = with_column(dataset, error_column, failures, strings=True)
+        return dataset
 
     def _translate(
         self,
         texts: list[str],
-        target: Language,
-        source: Language | None,
+        target_language: Language,
+        source_language: Language | None,
         batch_size: int,
         truncate: bool,
+        errors: ErrorPolicy,
     ) -> list[Translation]:
-        model = self._model_for(source, target)
-        return model.predict_batch_detailed(
-            texts, target, source, batch_size, truncate=truncate
+        """Translate `texts`, answering what needs no model before loading one."""
+        check_texts(texts)
+        target, source = _check_arguments(
+            target_language, source_language, batch_size, errors
         )
+        # Blank texts and same-language requests stay as given; translate the rest.
+        results = [Translation(t, status=TranslationStatus.UNCHANGED) for t in texts]
+        pending = [
+            i for i, text in enumerate(texts) if not is_blank(text) and source != target
+        ]
+        if not pending:
+            return results
+        model = self._model_for(source, target)
+
+        def run(batch: list[str]) -> list[Translation]:
+            return model.predict_batch_detailed(
+                batch, target, source, batch_size, truncate=truncate
+            )
+
+        batch = [texts[i] for i in pending]
+        translated = run(batch) if errors == "raise" else _record_failures(batch, run)
+        for i, translation in zip(pending, translated, strict=True):
+            results[i] = translation
+        return results
 
     def _model_for(self, source: Language | None, target: Language) -> BaseModel:
         if self.model is not None:
+            # Checked here so an unsupported pair fails the call even when
+            # `errors="record"` keeps per-text failures.
+            self.model.schema.validate(source, target, type(self.model).__name__)
             return self.model
-        source = None if source is None else Language(source)
-        target = Language(target)
         for candidate in _CANDIDATES[self.profile]:
             picked = candidate(source, target)
             if picked is None:
@@ -266,3 +326,39 @@ class Translator:
         raise UnsupportedLanguageError(
             f"No {self.profile} model translates {pair}; pass a model explicitly"
         )
+
+
+def _check_arguments(
+    target: Language,
+    source: Language | None,
+    batch_size: int,
+    errors: ErrorPolicy,
+) -> tuple[Language, Language | None]:
+    """Validate what applies to a whole call; return the languages as `Language`s."""
+    check_batch_size(batch_size)
+    if errors not in ("raise", "record"):
+        raise ValueError(f"errors must be 'raise' or 'record', got {errors!r}")
+    return Language(target), None if source is None else Language(source)
+
+
+def _record_failures(
+    texts: list[str], run: Callable[[list[str]], list[Translation]]
+) -> list[Translation]:
+    """`run(texts)`, with each text whose translation raises returned as a failure.
+
+    A batch that raises is split in half until the failing texts are alone, so the
+    others are still translated in batches.
+    """
+    try:
+        return run(texts)
+    except Exception as error:
+        if len(texts) == 1:
+            return [
+                Translation(
+                    texts[0],
+                    status=TranslationStatus.FAILED,
+                    error=f"{type(error).__name__}: {error}",
+                )
+            ]
+    middle = len(texts) // 2
+    return _record_failures(texts[:middle], run) + _record_failures(texts[middle:], run)

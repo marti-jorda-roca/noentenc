@@ -3,6 +3,7 @@ from collections.abc import Callable, Mapping, Sequence
 from functools import cached_property
 from pathlib import Path
 
+from noentenc._batching import check_batch_size, is_blank
 from noentenc.language_detection.labels import (
     UNDETERMINED,
     LabelMapper,
@@ -59,12 +60,12 @@ class BaseModel(ABC):
         """``{label: score}`` for each (non-empty) text, sorted descending."""
 
     def predict(self, text: str) -> str:
-        if not text or text.isspace():
+        if is_blank(text):
             return UNDETERMINED
         return self._predict_chunk([text])[0]
 
     def predict_score(self, text: str, top_k: int | None = None) -> dict[str, float]:
-        if not text or text.isspace():
+        if is_blank(text):
             return {UNDETERMINED: 1.0}
         return self._predict_score_chunk([text], top_k)[0]
 
@@ -128,9 +129,8 @@ def _run_batched[T](
     empty: Callable[[], T],
     sort_by_length: bool = False,
 ) -> list[T]:
-    if batch_size < 1:
-        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
-    keep = [i for i, text in enumerate(texts) if text and not text.isspace()]
+    check_batch_size(batch_size)
+    keep = [i for i, text in enumerate(texts) if not is_blank(text)]
     if sort_by_length:
         keep.sort(key=lambda i: len(texts[i]))
     results: list[T | None] = [None] * len(texts)
