@@ -81,6 +81,22 @@ jobs:
       - run: uv run --no-sync coverage run -m pytest tests/unit --strict-config --strict-markers -v --tb=short
       - run: uv run --no-sync coverage report
 
+  # The "Protect main" ruleset requires a check named exactly "Unit tests"; matrix jobs
+  # report as "Unit tests / <os> / Python <version>", so this job stands in for all of them.
+  unit-tests-gate:
+    name: Unit tests
+    if: always()
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every unit-test job passed
+        env:
+          RESULT: ${{ needs.unit-tests.result }}
+        run: |
+          echo "unit-tests matrix: $RESULT"
+          test "$RESULT" = "success"
+
   install-smoke:
     name: Wheel quickstart / ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
