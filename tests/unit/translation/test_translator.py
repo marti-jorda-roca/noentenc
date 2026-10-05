@@ -11,7 +11,12 @@ from noentenc.languages import (
 from noentenc.profiles import Profile
 from noentenc.translation import base as translator_module
 from noentenc.translation.base import Translator
-from noentenc.translation.models.base import BaseModel, Translation
+from noentenc.translation.models.base import (
+    BaseModel,
+    InputTooLongError,
+    Translation,
+    TranslationStatus,
+)
 from noentenc.translation.models.nllb import NLLBModel
 from noentenc.translation.models.small100 import SMaLL100Model
 
@@ -224,3 +229,141 @@ def test_every_profile_falls_back_to_small100_without_source(profile: Profile) -
 def test_rejection_names_the_profile() -> None:
     with pytest.raises(UnsupportedLanguageError, match="No quality model translates"):
         Translator("quality").translate("hello", Language.ACEHNESE)
+
+
+class FailingModel(UpperModel):
+    """Fails any batch that holds a text starting with "bad"."""
+
+    def predict_batch(
+        self,
+        texts: list[str],
+        target_language: Language,
+        source_language: Language | None = None,
+        batch_size: int = 32,
+    ) -> list[str]:
+        if any(text.startswith("bad") for text in texts):
+            self.batches.append(texts)
+            raise InputTooLongError(f"too long: {texts}")
+        return super().predict_batch(texts, target_language, source_language)
+
+
+@pytest.mark.usefixtures("fake_models")
+@pytest.mark.parametrize("batch_size", [0, -1, 2.5, "32", True])
+def test_invalid_batch_size_fails_before_loading_a_model(batch_size: object) -> None:
+    translator = Translator()
+    frame = pl.DataFrame({"text": ["hello"]})
+    with pytest.raises((TypeError, ValueError), match="batch_size"):
+        translator.translate_batch(["hello"], ES, EN, batch_size=batch_size)  # ty: ignore[invalid-argument-type]
+    with pytest.raises((TypeError, ValueError), match="batch_size"):
+        translator.translate_dataset(frame, "text", "out", ES, EN, batch_size)  # ty: ignore[no-matching-overload]
+    with pytest.raises((TypeError, ValueError), match="batch_size"):
+        translator.translate_batch([], ES, EN, batch_size=batch_size)  # ty: ignore[invalid-argument-type]
+    assert FakeOpus.created == []
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_invalid_texts_and_errors_fail_before_loading_a_model() -> None:
+    translator = Translator()
+    with pytest.raises(TypeError, match="texts must be a list"):
+        translator.translate_batch("hello", ES, EN)  # ty: ignore[invalid-argument-type]
+    with pytest.raises(TypeError, match=r"texts\[1\] must be a string, got NoneType"):
+        translator.translate_batch(["a", None], ES, EN)  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="errors must be"):
+        translator.translate_batch(["a"], ES, EN, errors="ignore")  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="is not a valid Language"):
+        translator.translate_batch([], "xx", EN)  # ty: ignore[invalid-argument-type]
+    assert FakeOpus.created == []
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_trivial_inputs_load_no_model() -> None:
+    translator = Translator()
+    assert translator.translate_batch([], ES, EN) == []
+    assert translator.translate_batch(["", "  \n"], ES) == ["", "  \n"]
+    assert translator.translate("hello", EN, EN) == "hello"
+    # Same language needs no model even where no model supports it.
+    assert translator.translate("hello", Language.ACEHNESE, Language.ACEHNESE)
+    frame = pl.DataFrame({"text": [None, "", "hi"]})
+    out = translator.translate_dataset(frame, "text", "out", EN, EN)
+    assert out["out"].to_list() == [None, "", "hi"]
+    assert translator.translate_dataset(
+        pl.DataFrame({"text": [None]}), "text", "out", ES
+    )["out"].to_list() == [None]
+    assert FakeOpus.created == []
+    assert FakeSmall100.created == 0
+
+
+def test_blank_and_same_language_results_are_unchanged() -> None:
+    model = UpperModel()
+    translator = Translator(model)
+    results = translator.translate_batch(["a", " ", "b"], ES, EN, detailed=True)
+    assert results == [
+        Translation("A:es"),
+        Translation(" ", status=TranslationStatus.UNCHANGED),
+        Translation("B:es"),
+    ]
+    assert model.batches == [["a", "b"]]
+    (same,) = translator.translate_batch(["a"], EN, EN, detailed=True)
+    assert same == Translation("a", status=TranslationStatus.UNCHANGED)
+
+
+def test_explicit_model_rejects_unsupported_pairs_before_translating() -> None:
+    class EnglishOnly(UpperModel):
+        schema = LanguageSchema(source=ANY_LANGUAGE, target=frozenset({EN}))
+
+    model = EnglishOnly()
+    with pytest.raises(UnsupportedLanguageError, match="cannot translate into"):
+        Translator(model).translate_batch(["a"], ES, errors="record")
+    assert model.batches == []
+
+
+def test_strict_mode_raises_the_model_error() -> None:
+    translator = Translator(FailingModel())
+    with pytest.raises(InputTooLongError, match="too long"):
+        translator.translate_batch(["ok", "bad"], EN)
+    with pytest.raises(InputTooLongError):
+        translator.translate_dataset(pl.DataFrame({"text": ["bad"]}), "text", "o", EN)
+
+
+def test_record_mode_isolates_failing_rows() -> None:
+    model = FailingModel()
+    translator = Translator(model)
+    texts = ["a", "bad1", "b", "c", "d", "e", "bad2", "f"]
+    results = translator.translate_batch(texts, EN, detailed=True, errors="record")
+    assert [r.text for r in results] == [
+        "A:en", "bad1", "B:en", "C:en", "D:en", "E:en", "bad2", "F:en"
+    ]  # fmt: skip
+    failed = {i: r.error for i, r in enumerate(results) if r.error is not None}
+    assert list(failed) == [1, 6]
+    assert failed[1] == "InputTooLongError: too long: ['bad1']"
+    assert {r.status for i, r in enumerate(results) if i not in failed} == {
+        TranslationStatus.TRANSLATED
+    }
+    assert results[1].status is TranslationStatus.FAILED
+    # Failing batches are halved, so the good texts next to them stay batched.
+    assert ["b", "c"] in model.batches
+    plain = translator.translate_batch(["bad", "a"], EN, errors="record")
+    assert plain == ["bad", "A:en"]
+
+
+@pytest.mark.parametrize("frame_type", [pl.DataFrame, pd.DataFrame])
+def test_record_mode_in_datasets_keeps_nulls_and_alignment(
+    frame_type: type[pl.DataFrame] | type[pd.DataFrame],
+) -> None:
+    translator = Translator(FailingModel())
+    frame = frame_type({"text": ["a", None, "bad", "", "b"]})
+    out = translator.translate_dataset(
+        frame,
+        "text",
+        "out",
+        EN,
+        batch_size=2,
+        show_progress=False,
+        errors="record",
+        error_column="error",
+    )
+    translated = [None if pd.isna(v) else v for v in list(out["out"])]
+    errors = [None if pd.isna(v) else v for v in list(out["error"])]
+    assert translated == ["A:en", None, None, "", "B:en"]
+    assert errors == [None, None, "InputTooLongError: too long: ['bad']", None, None]
+    assert list(out["text"]) == list(frame["text"])

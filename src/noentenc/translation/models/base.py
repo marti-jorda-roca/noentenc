@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from noentenc.languages import Language, LanguageSchema
@@ -9,9 +10,18 @@ class InputTooLongError(ValueError):
     """A sentence is longer than the model can read, and truncation wasn't requested."""
 
 
+class TranslationStatus(StrEnum):
+    TRANSLATED = "translated"
+    # Returned as given without calling a model: blank, or already in the target
+    # language.
+    UNCHANGED = "unchanged"
+    # The model raised, and `errors="record"` kept the original text.
+    FAILED = "failed"
+
+
 @dataclass(frozen=True)
 class Translation:
-    """A translated text and whether any of it may be missing."""
+    """A translated text, whether any of it may be missing, and how it was produced."""
 
     text: str
     # A sentence was longer than the model reads and its end was dropped
@@ -20,6 +30,9 @@ class Translation:
     # Generation hit its token limit before the model finished a sentence, so the
     # output may be cut short or end in repetition.
     output_limit_reached: bool = False
+    status: TranslationStatus = TranslationStatus.TRANSLATED
+    # Why the translation failed, as "ErrorType: message", when `status` is FAILED.
+    error: str | None = None
 
 
 class BaseModel(ABC):
