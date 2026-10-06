@@ -72,13 +72,18 @@ class ModelChoice:
         )
 
     def build(
-        self, *, only_local_files: bool = False, cache_dir: str | Path | None = None
+        self,
+        *,
+        only_local_files: bool = False,
+        cache_dir: str | Path | None = None,
+        num_threads: int | None = None,
     ) -> Seq2SeqModel:
         return self.model_class(
             self.repo,
             only_local_files,
             revision=self.revision,
             precision=self.precision,
+            num_threads=num_threads,
             cache_dir=cache_dir,
         )
 

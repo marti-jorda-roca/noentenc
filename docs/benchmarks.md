@@ -205,6 +205,32 @@ These are macOS figures. macOS compresses memory that isn't being used, which lo
 
 Without preservation, half the messages lose a literal. The models translate URL domains (`example.com` → `ejemplo.com`), reformat numbers and dates, rename placeholders and break Markdown links. With it, every literal survives. The placeholders stand for `ZXQ0`, `ZXQ1`…, which an earlier test found the models copy more reliably than `{0}`, `__0__`, `<x0>` or numbers: intact in all 59 Opus-MT and SMaLL-100 translations and 41 of 44 NLLB-200 and M2M100 ones. The few texts where a placeholder doesn't survive, typically one standing for a number before a unit, go through the piece-by-piece path.
 
+## Streaming
+
+`detect_batch`, `translate_batch` and the DataFrame methods take a list and return one, so their memory grows with the input. `detect_stream` and `translate_stream` read an iterable a chunk at a time (1,024 texts by default). Peak memory added on top of the loaded model while labelling or translating N unique short sentences, each run in a fresh process (median of 5 runs):
+
+| Task | Texts | Batch (list) | Stream (generator) |
+|---|---:|---:|---:|
+| Detection, lid176 | 100,000 | 44 MB | 25 MB |
+| | 1,000,000 | 211 MB | 38 MB |
+| Translation, Opus-MT en→es | 20,000 | 52 MB | 1 MB |
+| | 200,000 | 99 MB | 1 MB |
+
+Streamed detection levels off at the fastText word cache, which keeps at most 131,072 words. For translation, the model's inference is replaced by an echo of its input tokens, so the runs take seconds and leave out onnxruntime's working buffers, which depend on `batch_size` rather than on the number of texts. Tokenizing, sorting, decoding, literal preservation and the results are real. Memory is the physical footprint on macOS, which unlike resident memory counts compressed pages, sampled every 2 ms during the call.
+
+Streaming costs some speed, because texts are sorted by length within each chunk rather than across the whole input, so batches pad more. Translating the 2,000 English sentences of the [OPUS-100](https://huggingface.co/datasets/Helsinki-NLP/opus-100) en-es test set (4 to 766 characters) into Spanish with Opus-MT and `batch_size=32`, median of 3 alternating rounds:
+
+| Method | Sentences/s |
+|---|---:|
+| `translate_batch` | 44.2 |
+| `translate_stream`, `chunk_size=1024` (default) | 42.2 |
+| `translate_stream`, `chunk_size=256` | 33.7 |
+| `translate_stream`, `chunk_size=64` | 22.7 |
+
+The default chunk size keeps 95% of the batch speed. Small chunks are much slower on text of mixed lengths: a batch decodes until its longest sentence ends, and with few sentences to sort, most batches hold a long one.
+
+To reproduce, run `uv run --with psutil python scripts/benchmark_streaming.py memory` and `uv run python scripts/benchmark_streaming.py speed --corpus FILE`, with one English sentence per line in `FILE`.
+
 ## Profiles
 
 `LanguageDetector(profile)` and `Translator(profile)` pick models from the measurements below. Accuracy comes from the [FLORES-200](https://github.com/facebookresearch/flores/tree/main/flores200) devtest set, which has the same 1,012 sentences in 204 language variants.

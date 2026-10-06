@@ -1,5 +1,6 @@
 """`source_language="auto"`: detect, group by language and translate in one call."""
 
+from itertools import islice
 from pathlib import Path
 
 import pandas as pd
@@ -16,6 +17,7 @@ from noentenc.language_detection.models.base import BaseModel as DetectionModel
 from noentenc.language_detection.models.fasttext import FastTextModel
 from noentenc.translation import Translation, TranslationStatus, Translator
 from noentenc.translation.base import AUTO_DETECTION_SETTINGS, SourceLanguageError
+from tests.unit.helpers import CountingTexts
 from tests.unit.language_detection.helpers import FASTTEXT_FIXTURES
 from tests.unit.translation.test_translator import (  # noqa: F401 - fixture
     FakeNLLB,
@@ -316,3 +318,32 @@ def test_prepare_auto_downloads_every_route_and_the_detector(
     noentenc.prepare("balance", detection=False, translation=[("auto", "en")])
     assert [load["class"] for load in FakeSeq2Seq.loads].count("FakeNLLB") == 1
     assert FakeNLLB.created == []  # downloaded, never loaded
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_stream_detects_and_groups_each_chunk(detector: LanguageDetector) -> None:
+    texts = CountingTexts(INBOX)
+    stream = Translator(detector=detector).translate_stream(
+        texts, EN, "auto", detailed=True, chunk_size=3
+    )
+    first = next(stream)
+    assert first.source_language == DE
+    # Only the first chunk has been read and detected.
+    assert texts.read == 3
+    assert isinstance(detector.model, ScriptedDetector)
+    assert detector.model.seen == INBOX[:3]
+    batch = Translator(detector=detector).translate_batch(
+        INBOX, EN, "auto", detailed=True
+    )
+    assert [first, *stream] == batch
+
+
+def test_stream_unknown_source_raises_at_its_chunk(translator: Translator) -> None:
+    texts = ["Guten Morgen", "Buenos días", "Bonjour à tous", "Hans Müller"]
+    stream = translator.translate_stream(
+        texts, EN, "auto", unknown_source="raise", chunk_size=2
+    )
+    assert list(islice(stream, 2)) == ["GUTEN MORGEN:en", "BUENOS DÍAS:en"]
+    # The index counts from the start of the stream, not of the chunk.
+    with pytest.raises(SourceLanguageError, match=r"texts\[3\] \(unknown_source"):
+        next(stream)

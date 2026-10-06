@@ -194,6 +194,37 @@ def test_batch_is_sorted_padded_chunked_and_restored(m2m_dir: Path) -> None:
     assert config.max_new_tokens == min(model.max_length, 2 * 6 + 10)
 
 
+class RecordingTokenizer:
+    """Wraps a tokenizer, recording how many texts each `encode_batch` call gets."""
+
+    def __init__(self, tokenizer: Tokenizer) -> None:
+        self.tokenizer = tokenizer
+        self.sizes: list[int] = []
+
+    def encode_batch(self, texts: list[str], **kwargs: object) -> list:
+        self.sizes.append(len(texts))
+        return self.tokenizer.encode_batch(texts, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.tokenizer, name)
+
+
+def test_sentences_are_tokenized_a_window_at_a_time(
+    m2m_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_seq2seq, "_TOKENIZE_WINDOW", 2)
+    model = SMaLL100Model(m2m_dir)
+    tokenizer = RecordingTokenizer(model.tokenizer)
+    model.tokenizer = tokenizer  # ty: ignore[invalid-assignment]
+    texts = ["hello world", "hello", "hola mundo", "mundo", "Hello end."]
+    assert model.predict_batch(texts, EN, batch_size=4) == texts
+    assert tokenizer.sizes == [2, 2, 1]
+    # Sorting by length still spans windows: one batch of the 4 shortest, then 1.
+    assert [ids.shape[0] for ids, _, _ in FakeEngine.calls] == [4, 1]
+    with pytest.raises(InputTooLongError, match="has 40"):
+        model.predict_batch(["hello", "mundo", " ".join(["hello"] * 40)], EN)
+
+
 def test_long_sentences_raise_unless_truncated(m2m_dir: Path) -> None:
     model = SMaLL100Model(m2m_dir)
     text = " ".join(["hello"] * 40)

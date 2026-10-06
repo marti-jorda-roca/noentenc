@@ -29,7 +29,7 @@ Translator().translate("The weather is nice today.", Language.SPANISH, Language.
 - **Faster than the originals.** Up to 470× faster than `langid.py`, 2× faster than the C++ `fasttext` package and 5.8× faster than transformers + PyTorch, with the same accuracy. See [the comparison](docs/benchmarks.md#against-the-original-implementations).
 - **Small.** The default detection model is 0.9 MB, and detection needs only numpy and tqdm. Translation adds onnxruntime, tokenizers and huggingface-hub. There is no torch, transformers or GPU dependency.
 - **One API, many models.** 12 detection models and 4 translation model families sit behind the same two classes. Swapping one is a one-line change, and every detector returns the same ISO 639-3 labels.
-- **Built for datasets.** You can pass a single string, a list or a pandas or polars column.
+- **Built for datasets.** You can pass a single string, a list or a pandas or polars column, or stream a file of any length with flat memory.
 
 New to noentenc? The [quickstart](docs/quickstart.md) covers detection, translation and choosing a model on one page.
 
@@ -69,6 +69,10 @@ detector.detect_batch(["Hello there", "Hola, ¿qué tal?", "你好", "👍", ""]
 
 # Add a "lang" column to a pandas or polars DataFrame.
 detector.detect_dataset(df, "text", "lang")
+
+# Any iterable, such as a file's lines, read a chunk at a time with flat memory.
+for lang in detector.detect_stream(line.rstrip("\n") for line in open("comments.txt")):
+    ...
 ```
 
 Text without letters outside URLs and email addresses, such as digits, emoji, punctuation or a bare link, returns `zxx` (no linguistic content) without running the model. Every other text gets the model's best guess, even `lol` or a person's name. To get `und` instead when the model is unsure, set thresholds, and use `detailed=True` to see why:
@@ -126,6 +130,8 @@ translator.translate(
 ```
 
 See [Keep links and placeholders](docs/quickstart.md#keep-links-and-placeholders) for what is covered and its limits.
+
+For input too large to hold in memory, `translate_stream` takes any iterable of strings, such as a file's lines or a database cursor. It translates a chunk at a time and yields the results in input order; see [Stream large inputs](docs/quickstart.md#stream-large-inputs). `Translator(num_threads=2)` caps the CPU threads each model uses, for when several workers share a machine.
 
 For bulk jobs, `errors="record"` keeps going past a text that fails. That text comes back as given, with its status and error in the detailed result (or in an `error_column` for `translate_dataset`), and the rest are still translated. Empty batches, blank texts and same-language requests return without loading a model.
 
@@ -192,6 +198,9 @@ Each plan reports the model's licence, download size, RAM (measured, or estimate
 | [prepare_offline.py](docs/examples/prepare_offline.py) | Download a profile's weights into one directory, then detect and translate without network access. |
 | [translate_long_text.py](docs/examples/translate_long_text.py) | Translate emails and documents, and choose between an error and `truncate=True` for over-long sentences. |
 | [manage_memory.py](docs/examples/manage_memory.py) | Bound how many translation models stay loaded, and free them with `unload()`. |
+| [stream_detection.py](docs/examples/stream_detection.py) | Label every line of a large file with flat memory, and stop reading once you have what you need. |
+| [stream_translation.py](docs/examples/stream_translation.py) | Translate a JSON Lines file of any size with `translate_stream`, writing each result as it comes. |
+| [parallel_workers.py](docs/examples/parallel_workers.py) | Split a job across processes and give each translator its share of the cores with `num_threads`. |
 | [plan_and_limit.py](docs/examples/plan_and_limit.py) | See what a profile would download and what it costs, and restrict it by licence and download size. |
 | [preserve_literals.py](docs/examples/preserve_literals.py) | Translate messages without breaking their links, emails, code, tags and placeholders. |
 | [translate_bulk.py](docs/examples/translate_bulk.py) | Run bulk jobs with `errors="record"` so one bad row doesn't stop them, and skip model loads for empty, blank and same-language input. |
