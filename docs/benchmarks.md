@@ -2,11 +2,35 @@
 
 Speed numbers for every backend, measured on an Apple M3 (8 cores, macOS) with Python 3.14 and the weights noentenc downloads by default. Most sections measure speed only; [Profiles](#profiles) also measures accuracy, which is how the `speed`, `balance` and `quality` profiles were chosen.
 
+[First use](#first-use) measures what a new user pays end to end: install, the first call with its downloads, a cached start-up and warm calls, for the default models.
+
 To reproduce:
 
 ```bash
 uv run python scripts/benchmark_lid.py --download
 uv run python scripts/benchmark_translation.py --models opus-mt small100 m2m100 nllb
+```
+
+## First use
+
+What the [quickstart](quickstart.md#what-the-first-call-costs) costs, from a fresh install to warm calls, on the defaults. `core` installs the wheel alone and runs `LanguageDetector().detect("Bon dia! Com estàs?")`. `translation` installs `noentenc[translation]` and runs `Translator().translate_batch(texts, "en", "auto")` on the README's three-message inbox: Spanish and German texts, translated by two Opus-MT models at q4, and an English one, returned as it is.
+
+| Install | Install time | Installed | First call | Downloaded | Cached start-up | Warm call | Peak RAM |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| core | 0.5 s | 23 MB | 1.0 s | 0.9 MB | 0.10 s | 0.12 ms | 59 MB |
+| translation | 1.0 s | 127 MB | 20 s | 554 MB | 1.2 s | 80 ms | 1.8 GB |
+
+- **Install time** is `uv pip install` into a new virtual environment with uv's package cache off, so every package downloads. **Installed** is the size of the environment's `site-packages`.
+- **First call** is a fresh process with an empty weights cache, from the first `import noentenc` to the first result. It includes downloading the weights (**Downloaded**) and loading them.
+- **Cached start-up** is the same, in a new process once the weights are cached: import, load and the first result.
+- **Warm call** is the median latency of further calls in that process. For detection, that's one `detect()` call on each of 12 sentences in 12 languages it hasn't seen. For translation, it's the whole inbox: detection, then both models. On repeated text the detector is faster, about 15 µs per sentence, because fastText caches each word's embedding.
+- **Peak RAM** is the cached process's maximum resident memory, Python included. Two Opus-MT models take most of it; see [Memory](#memory).
+
+Medians of 7 runs on an Apple M3 (8 cores, macOS 26.6), Python 3.14.4 and uv 0.12.22. Across runs, the translation first call took 19 to 21 s and its warm call 78 to 110 ms. Install and first-call times depend on the network, and Hugging Face downloads are faster with an `HF_TOKEN`. To measure your machine, build the wheel and run the script, which prints its environment first:
+
+```bash
+uv build --wheel
+uv run python scripts/measure_first_use.py dist/noentenc-*.whl
 ```
 
 ## Language detection
@@ -16,18 +40,18 @@ Two workloads, both in batches of 256:
 - **Short sentences.** The 43 multilingual test sentences in `tests/unit/language_detection/fixtures/sentences.txt`, repeated up to 20,000 texts. The two transformer models run on 2,000 texts. "Single text" is the median latency of one `predict` call over 200 runs. Words repeat, so fastText's per-word cache stays warm.
 - **Unique paragraphs.** The first 20,000 paragraphs of the [WiLI-2018](https://huggingface.co/datasets/MartinThoma/wili_2018) test set: 235 languages, a median of 272 characters, no text seen twice. "Single text" is the median over 200 further paragraphs the model hasn't seen. This is closer to labelling a real dataset, and the cost of words the cache hasn't seen yet shows.
 
-| Backend | Load | Single sentence | Sentences/s | Single paragraph | Paragraphs/s | Size | Languages |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| `heliport` | 0.10 s | 2.5 µs | 1.2M | 28 µs | 135k | ~130 MB wheel | 220 |
-| `lid176` (default) | 0.02 s | 15 µs | 419k | 0.15 ms | 22k | 0.9 MB | 176 |
-| `lid176-bin` | 0.02 s | 15 µs | 436k | 0.16 ms | 12k | 126 MB | 176 |
-| `openlid-v3` | 0.06 s | 47 µs | 210k | 0.31 ms | 2.7k | 1.2 GB | 195 |
-| `langid` | 0.80 s | 19 µs | 730k | 36 µs | 65k | 1.9 MB | 97 |
-| `cld3` | <0.01 s | 16 µs | 66k | 65 µs | 12k | 1 MB | 107 |
-| `lingua` (low accuracy) | <0.01 s | 0.36 ms | 18k | 2.2 ms | 1.8k | ~300 MB wheel | 75 |
-| `lingua` | <0.01 s | 0.44 ms | 9.2k | 1.2 ms | 3.6k | ~300 MB wheel | 75 |
-| `bert-openlid` | 0.14 s | 0.35 ms | 3.5k | 2.2 ms | 570 | 25 MB | 201 |
-| `xlm-roberta-lid` | 0.45 s | 3.9 ms | 395 | 28 ms | 32 | 279 MB | 20 |
+| Backend | Load | Single sentence | Sentences/s | Single paragraph | Paragraphs/s | Size | Languages | Install | Licence |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---|
+| `lid176` (default) | 0.02 s | 15 µs | 419k | 0.15 ms | 22k | 0.9 MB | 176 | core | CC-BY-SA-3.0 |
+| `lid176-bin` | 0.02 s | 15 µs | 436k | 0.16 ms | 12k | 126 MB | 176 | core | CC-BY-SA-3.0 |
+| `openlid-v3` | 0.06 s | 47 µs | 210k | 0.31 ms | 2.7k | 1.2 GB | 195 | core | GPL-3.0 |
+| `langid` | 0.80 s | 19 µs | 730k | 36 µs | 65k | 1.9 MB | 97 | core | BSD-2-Clause |
+| `cld3` | <0.01 s | 16 µs | 66k | 65 µs | 12k | 1 MB | 107 | `noentenc[cld3]` | Apache-2.0 |
+| `heliport` | 0.10 s | 2.5 µs | 1.2M | 28 µs | 135k | ~130 MB wheel | 220 | `noentenc[heliport]`, no Windows wheel | GPL-3.0 |
+| `lingua` (low accuracy) | <0.01 s | 0.36 ms | 18k | 2.2 ms | 1.8k | ~300 MB wheel | 75 | `noentenc[lingua]` | Apache-2.0 |
+| `lingua` | <0.01 s | 0.44 ms | 9.2k | 1.2 ms | 3.6k | ~300 MB wheel | 75 | `noentenc[lingua]` | Apache-2.0 |
+| `bert-openlid` | 0.14 s | 0.35 ms | 3.5k | 2.2 ms | 570 | 25 MB | 201 | `noentenc[onnx]` | MIT |
+| `xlm-roberta-lid` | 0.45 s | 3.9 ms | 395 | 28 ms | 32 | 279 MB | 20 | `noentenc[onnx]` | MIT |
 
 To measure on your own texts, pass a file with one text per line: `scripts/benchmark_lid.py --corpus texts.txt`. The multi-threaded backends (onnxruntime, lingua, heliport) vary by about 15% between runs on the benchmark laptop, which throttles under sustained load.
 
@@ -44,7 +68,7 @@ Both return the same labels and scores as the reference `fasttext` and `langid` 
 
 ### Which one to use
 
-- **Default to `lid176`.** It's 0.9 MB, has no dependencies beyond numpy, and labels about 20k paragraphs or 400k short sentences per second.
+- **Default to `lid176`.** It's 0.9 MB, has no dependencies beyond numpy, and labels about 22k unseen paragraphs per second in batches. One `detect()` call on a sentence it hasn't seen takes about 0.12 ms.
 - **For the long tail, use `glotlid`.** It has 2102 labels and runs on the same engine, but downloads 1.7 GB.
 - **For short texts in a known set of languages, use `LinguaModel(languages=[...])`.** It's slower, but restricting the candidates helps where n-gram models struggle.
 - **`heliport` is the fastest**, but it's GPL-3.0 and has no Windows wheel.

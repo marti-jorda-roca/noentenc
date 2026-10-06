@@ -1,8 +1,9 @@
-"""Run the quickstart against an installed noentenc, as CI does with the built wheel.
+"""Run the README quickstart against an installed noentenc, as CI does with the built wheel.
 
-`detection` expects a core-only install: it checks that the translation dependencies are
-neither installed nor imported. `translation` expects `noentenc[translation]` and downloads
-the Opus-MT en→es model (107 MB at int8).
+Both run the README's example as written, on the default models. `detection` expects a
+core-only install: it checks that the translation dependencies are neither installed nor
+imported, and downloads lid176 (0.9 MB). `translation` expects `noentenc[translation]` and
+downloads Opus-MT es→en and de→en at q4 (554 MB with lid176).
 
     uv run --no-project --isolated --with dist/noentenc-*.whl \
         python scripts/smoke_quickstart.py detection
@@ -39,20 +40,29 @@ def detection() -> None:
 
 
 def translation() -> None:
-    from noentenc import Language
-    from noentenc.translation import OpusMTModel, Precision, Translator
+    from noentenc.translation import TranslationStatus, Translator
 
-    translator = Translator(
-        OpusMTModel.from_pair(
-            Language.ENGLISH, Language.SPANISH, precision=Precision.INT8
-        )
-    )
-    text = translator.translate(
-        "The weather is nice today.", Language.SPANISH, Language.ENGLISH
-    )
-    print(text)
-    if "tiempo" not in text.lower():
-        raise SystemExit(f"unexpected translation: {text!r}")
+    # The README quickstart, as written.
+    inbox = [
+        "Hola, ¿cuándo llega mi pedido?",
+        "Der Link funktioniert nicht.",
+        "Thanks, it works now.",
+    ]
+    translator = Translator()
+    texts = translator.translate_batch(inbox, "en", "auto")
+    print(texts)
+    if "order" not in texts[0].lower() or "link" not in texts[1].lower():
+        raise SystemExit(f"unexpected translation: {texts!r}")
+
+    results = translator.translate_batch(inbox, "en", "auto", detailed=True)
+    routes = [(r.status, r.detected_language, r.model) for r in results]
+    print(routes)
+    if [r.text for r in results] != texts or routes != [
+        (TranslationStatus.TRANSLATED, "spa", "OpusMTModel(Xenova/opus-mt-es-en)"),
+        (TranslationStatus.TRANSLATED, "deu", "OpusMTModel(Xenova/opus-mt-de-en)"),
+        (TranslationStatus.UNCHANGED, "eng", None),
+    ]:
+        raise SystemExit(f"unexpected routing: {routes!r}")
 
 
 def main() -> None:

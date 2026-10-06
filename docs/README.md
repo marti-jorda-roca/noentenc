@@ -4,29 +4,37 @@ noentenc detects languages and translates text in Python, on CPU, without torch.
 
 ## Start here
 
-1. Install the package with translation support. It needs Python 3.11 or newer.
+1. Install the package with translation support, with pip or uv. It needs Python 3.11 or newer.
 
    ```bash
-   uv add 'noentenc[translation]'
+   pip install 'noentenc[translation]'  # with pip
+   uv add 'noentenc[translation]'       # or with uv
    ```
 
-2. Detect a language and translate a sentence:
+2. Detect a language, and translate a mixed-language batch into English:
 
    ```python
-   from noentenc import Language
    from noentenc.language_detection import LanguageDetector
    from noentenc.translation import Translator
 
    LanguageDetector().detect("Bon dia! Com estàs?")
    # 'cat'
 
-   Translator().translate("The weather is nice today.", Language.SPANISH, Language.ENGLISH)
-   # 'El tiempo es bueno hoy.'
+   Translator().translate_batch(
+       [
+           "Hola, ¿cuándo llega mi pedido?",
+           "Der Link funktioniert nicht.",
+           "Thanks, it works now.",
+       ],
+       "en",
+       "auto",
+   )
+   # ['Hey, when does my order arrive?', "The link doesn't work.", 'Thanks, it works now.']
    ```
 
-   The first call downloads the weights it needs: 0.9 MB for detection and 287 MB for the Opus-MT English to Spanish model.
+   The first run downloads the weights it needs: 0.9 MB for detection and 554 MB for two Opus-MT models, Spanish and German into English. [What the first call costs](quickstart.md#what-the-first-call-costs) has the timings.
 
-3. Read the [quickstart](quickstart.md). It covers detection, translation, profiles, DataFrames and offline use on one page.
+3. Read the [quickstart](quickstart.md). It covers detection, translation, DataFrames and streaming on the defaults, then profiles, models, memory and offline use.
 
 4. Run an [example](#examples) close to your task and change it to fit.
 
@@ -35,7 +43,7 @@ noentenc detects languages and translates text in Python, on CPU, without torch.
 | Page | Read it to |
 |---|---|
 | [quickstart.md](quickstart.md) | Learn the API: detect, translate, abstain when unsure, handle long text, keep links and placeholders, pick a profile or a model, work with DataFrames, stream large inputs and run offline. |
-| [benchmarks.md](benchmarks.md) | Compare models on speed, memory and accuracy, choose detection thresholds, and see why each profile uses the models it does. |
+| [benchmarks.md](benchmarks.md) | See what the first install and call cost, compare models on speed, memory and accuracy, choose detection thresholds, and see why each profile uses the models it does. |
 | [custom-models.md](custom-models.md) | Load your own weights, wrap another detector or translator, add an ONNX encoder-decoder, or contribute a model to noentenc. |
 
 The project README has the [model tables](../README.md#models) with each model's size and licence, and the [extras](../README.md#install) each backend needs.
@@ -45,8 +53,9 @@ The project README has the [model tables](../README.md#models) with each model's
 | I want to | Go to |
 |---|---|
 | Install only what I need | [Install](../README.md#install) |
+| Know what the first call downloads and how long it takes | [What the first call costs](quickstart.md#what-the-first-call-costs), [First use](benchmarks.md#first-use) |
 | Return `und` instead of guessing on short or unclear text | [Abstain when unsure](quickstart.md#abstain-when-unsure), [Conservative detection](benchmarks.md#conservative-detection) |
-| Translate texts in several languages in one call | [Detect, then translate](quickstart.md#detect-then-translate) |
+| Translate texts in several languages in one call | [Translate](quickstart.md#translate) |
 | Translate emails and documents | [Long text](quickstart.md#long-text) |
 | Keep URLs, emails, code and placeholders intact | [Keep links and placeholders](quickstart.md#keep-links-and-placeholders) |
 | Keep a bulk job going past bad rows | [Keep going past bad rows](quickstart.md#keep-going-past-bad-rows) |

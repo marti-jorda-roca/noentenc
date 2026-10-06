@@ -127,6 +127,17 @@ jobs:
         run: uv run --no-project --isolated --with dist/*.whl python scripts/smoke_quickstart.py detection
         env:
           NOENTENC_CACHE: ${{ runner.temp }}/noentenc
+      # The README gives pip and uv equally; check pip installs the wheel the same way.
+      - name: Detection quickstart, core install with pip
+        run: |
+          venv="$RUNNER_TEMP/pip-venv"
+          uv venv --seed "$venv"
+          python="$venv/bin/python"
+          [ -x "$python" ] || python="$venv/Scripts/python.exe"
+          "$python" -m pip install --quiet dist/*.whl
+          "$python" scripts/smoke_quickstart.py detection
+        env:
+          NOENTENC_CACHE: ${{ runner.temp }}/noentenc
       - name: Translation quickstart, translation extra
         run: |
           wheel=$(ls dist/*.whl)

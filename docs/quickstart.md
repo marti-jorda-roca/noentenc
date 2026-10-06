@@ -1,16 +1,32 @@
 # Quickstart
 
-This page walks through the basics: detect a language, translate text, and choose a model when the default doesn't fit.
+This page covers the common path first: install, detect a language, and translate texts in any mix of languages, all on the defaults. Choosing other models, profiles, memory limits and offline deployment comes after, in [Choose models and resources](#choose-models-and-resources).
 
 ## Install
 
-noentenc needs Python 3.11 or newer.
+noentenc needs Python 3.11 or newer, on Linux, macOS or Windows. Install it with pip or uv:
 
 ```bash
-uv add 'noentenc[translation]'
+pip install 'noentenc[translation]'  # with pip
+uv add 'noentenc[translation]'       # or with uv
 ```
 
-That installs detection and every translation model. If you only detect languages, `uv add noentenc` is enough: it has the fastText and langid backends and needs only numpy. Weights download the first time you use a model, so expect the first call to be slow. After that they load from the cache.
+That installs detection and every translation model. For detection alone, `pip install noentenc` or `uv add noentenc` is enough: it has the fastText and langid backends and needs only numpy and tqdm. The [README](../README.md#install) lists the other extras.
+
+### What the first call costs
+
+Nothing is bundled in the wheel. Each model downloads the first time it's used, into `~/.cache/noentenc`, and later processes load it from there. For the first detection example and the first translation example below:
+
+| | Detection only | With translation |
+|---|---:|---:|
+| Installed packages | 23 MB | 127 MB |
+| Weights downloaded on first use | 0.9 MB | 554 MB |
+| First call, download included | 1 s | 20 s |
+| A later process, import to first result | 0.1 s | 1.2 s |
+| Each call after that | 0.12 ms | 80 ms |
+| Peak RAM | 59 MB | 1.8 GB |
+
+Measured from a fresh install of the wheel on an Apple M3; the first call's time depends on your connection. [First use](benchmarks.md#first-use) has the conditions and the command to measure your own machine. To download ahead of time, see [Run offline](#run-offline). To check what a call would download, and its licence, before it does, see [Plan, and set limits](#plan-and-set-limits).
 
 ## Detect a language
 
@@ -63,17 +79,67 @@ If you know which languages to expect, `candidates=["eng", "spa", "cat"]` makes 
 
 ## Translate
 
+Give `translate_batch` your texts and the language you want them in. With `"auto"` as the source language, it detects each text's language and translates it with the model for that pair. Results come back in input order.
+
 ```python
 from noentenc import Language
 from noentenc.translation import Translator
 
 translator = Translator()
 
-translator.translate("The weather is nice today.", Language.SPANISH, Language.ENGLISH)
-# 'El tiempo es bueno hoy.'
+messages = [
+    "Hola, ¿cuándo llega mi pedido?",
+    "Der Link im Newsletter funktioniert nicht.",
+    "Thanks, the issue is fixed now.",
+    "lol",
+]
+translator.translate_batch(messages, Language.ENGLISH, "auto")
+# ['Hey, when does my order arrive?', 'The link in the newsletter does not work.',
+#  'Thanks, the issue is fixed now.', 'lol']
 ```
 
-The arguments are the text, the target language and the source language, in that order. Languages are `Language` members, or codes and names that mean one: `"es"`, `"spa"`, `"es-ES"` and `"spanish"` all work. An unknown one raises `UnsupportedLanguageError` before any model loads.
+The arguments are the texts, the target language and the source language, in that order. Languages are `Language` members, or codes and names that mean one: `"en"`, `"eng"`, `"en-GB"` and `"english"` all work. An unknown one raises `UnsupportedLanguageError` before any model loads.
+
+The first call downloads the default detector and one model per source language: here Opus-MT Spanish to English and German to English, 287 MB each.
+
+You don't convert detector labels or group texts by language yourself. `"auto"` handles each text like this:
+
+- Pairs with an Opus-MT model use it, and the other languages use the profile's fallback (SMaLL-100 for `speed`).
+- Texts already in the target language, blank texts, and texts without linguistic content (a bare link, emoji) come back unchanged, without a model.
+- The detector is the profile's `LanguageDetector`, set to abstain with `min_letters=4, min_score=0.5`. When it can't tell the language, the text comes back as given with status `unknown_source`. If it detects a language no model translates into the target, the status is `unsupported_source`. Pass `unknown_source="fallback"` to translate those texts without a source language, or `unknown_source="raise"` to fail the call with `SourceLanguageError` (from `noentenc.translation`) before anything is translated. The error names the first such text by index. To use other thresholds or another backend, pass `Translator(detector=LanguageDetector(...))`.
+- `detailed=True` gives each text's `source_language`, `detected_language`, `detection_score`, `status` and `model`.
+- Each model loads once per call and respects `max_loaded_models`, including in `translate_dataset`, which also takes `status_column=` and `source_column=`.
+
+```python
+df = translator.translate_dataset(
+    df, "message", "english", Language.ENGLISH, "auto", status_column="status"
+)
+```
+
+`noentenc.prepare(translation=[("auto", "en")])` downloads every model that can be needed for a target, for running offline. [translate_to_english.py](examples/translate_to_english.py) runs a whole inbox and a DataFrame.
+
+To map a detector label to a `Language` yourself, use `to_language`. It accepts ISO 639-1 and 639-3 codes, BCP-47 tags and English names. It folds individual languages into their macrolanguage when only that is supported, so `"cmn"` becomes `Language.CHINESE` and `"nob"` becomes `Language.NORWEGIAN`.
+
+```python
+from noentenc import to_language
+
+to_language("deu")  # Language.GERMAN
+to_language("und", None)  # None instead of UnsupportedLanguageError
+```
+
+### When you know the source language
+
+Pass it instead of `"auto"`. Nothing is detected, and every text goes to the model for that pair. `translate` takes one text.
+
+```python
+translator.translate("The weather is nice today.", Language.SPANISH, Language.ENGLISH)
+# 'El tiempo es bueno hoy.'
+
+translator.translate_batch(
+    ["Where is the station?", "I love this city."], Language.SPANISH, Language.ENGLISH
+)
+# ['¿Dónde está la estación?', 'Me encanta esta ciudad.']
+```
 
 The source language is optional.
 
@@ -82,16 +148,7 @@ translator.translate("Bon dia a tothom!", Language.ENGLISH)
 # 'Good day to everyone!'
 ```
 
-Pass it anyway when you know it. `Translator()` picks the lightest model for each pair, and it can only pick a dedicated Opus-MT model (about 75M parameters, 66 directions) when it knows the source. Without a source it falls back to SMaLL-100, a 595 MB model that covers 100 languages.
-
-`translate_batch` translates a list in one call.
-
-```python
-translator.translate_batch(
-    ["Where is the station?", "I love this city."], Language.SPANISH, Language.ENGLISH
-)
-# ['¿Dónde está la estación?', 'Me encanta esta ciudad.']
-```
+Pass it, or `"auto"`, when you can. `Translator()` picks the lightest model for each pair, and it can only pick a dedicated Opus-MT model (about 75M parameters, 66 directions) when it knows the source. Without a source it falls back to SMaLL-100, a 595 MB model that covers 100 languages.
 
 ### Long text
 
@@ -120,28 +177,6 @@ result.output_limit_reached  # True if the output may be cut short
 `translate_batch` takes the same `truncate` and `detailed` arguments, and `translate_dataset` takes `truncate`.
 
 Blank texts, and texts whose source language is already the target, come back unchanged without loading a model. Their detailed status is `unchanged`.
-
-### Memory
-
-A `Translator` loads a model the first time a pair needs it and keeps it for later calls. It keeps at most two by default. When a pair needs a third, the least recently used model is dropped first, and it's loaded again if a later call needs it. Each one takes 0.6 to 1.2 GB of RAM for Opus-MT and SMaLL-100, and up to 4 GB for NLLB-200, far more than its download.
-
-```python
-translator = Translator(
-    max_loaded_models=4
-)  # fewer reloads, more memory; None for no limit
-translator.loaded_models  # the models it holds right now
-translator.unload()  # free them; the next call loads what it needs again
-```
-
-### Threads
-
-By default onnxruntime gives each translation model every physical core. That's the fastest setup for one process, but when several workers share a machine they compete for the same cores. Give each one its share:
-
-```python
-translator = Translator(num_threads=2)
-```
-
-The cap applies to every model the translator loads. A model you build yourself takes `num_threads=` too, and so do the ONNX detection models (`OnnxClassifierModel("bert-openlid", num_threads=2)`). The fastText models the detection profiles use don't run on onnxruntime and have no thread setting. [parallel_workers.py](examples/parallel_workers.py) splits a job across processes this way.
 
 ### Keep links and placeholders
 
@@ -195,178 +230,6 @@ df = translator.translate_dataset(
 # Failed rows have a null "text_en" and the message in "error".
 ```
 
-## Detect, then translate
-
-For a mixed-language inbox, pass `source_language="auto"`. Each text's language is detected, and texts in the same language go through the right model together. Results come back in input order.
-
-```python
-messages = [
-    "Hola, ¿cuándo llega mi pedido?",
-    "Der Link im Newsletter funktioniert nicht.",
-    "Thanks, the issue is fixed now.",
-    "lol",
-]
-translator.translate_batch(messages, Language.ENGLISH, "auto")
-# ['Hey, when does my order arrive?', 'The link in the newsletter does not work.',
-#  'Thanks, the issue is fixed now.', 'lol']
-```
-
-- Pairs with an Opus-MT model use it, and the other languages use the profile's fallback (SMaLL-100 for `speed`).
-- Texts already in the target language, blank texts, and texts without linguistic content (a bare link, emoji) come back unchanged, without a model.
-- The detector is the profile's `LanguageDetector`, set to abstain with `min_letters=4, min_score=0.5`. When it can't tell the language, the text comes back as given with status `unknown_source`. If it detects a language no model translates into the target, the status is `unsupported_source`. Pass `unknown_source="fallback"` to translate those texts without a source language, or `unknown_source="raise"` to fail the call with `SourceLanguageError` (from `noentenc.translation`) before anything is translated. The error names the first such text by index. To use other thresholds or another backend, pass `Translator(detector=LanguageDetector(...))`.
-- `detailed=True` gives each text's `source_language`, `detected_language`, `detection_score`, `status` and `model`.
-- Each model loads once per call and respects `max_loaded_models`, including in `translate_dataset`, which also takes `status_column=` and `source_column=`.
-
-```python
-df = translator.translate_dataset(
-    df, "message", "english", Language.ENGLISH, "auto", status_column="status"
-)
-```
-
-`noentenc.prepare(translation=[("auto", "en")])` downloads every model that can be needed for a target, for running offline. [translate_to_english.py](examples/translate_to_english.py) runs a whole inbox and a DataFrame.
-
-To map a detector label to a `Language` yourself, use `to_language`. It accepts ISO 639-1 and 639-3 codes, BCP-47 tags and English names. It folds individual languages into their macrolanguage when only that is supported, so `"cmn"` becomes `Language.CHINESE` and `"nob"` becomes `Language.NORWEGIAN`.
-
-```python
-from noentenc import to_language
-
-to_language("deu")  # Language.GERMAN
-to_language("und", None)  # None instead of UnsupportedLanguageError
-```
-
-## Trade speed for quality
-
-Pass a profile instead of a model and noentenc picks one for you. The three profiles are `"speed"`, `"balance"` and `"quality"`, and `Profile.SPEED`, `Profile.BALANCE` and `Profile.QUALITY` work too. A misspelled profile raises `ValueError`.
-
-```python
-from noentenc import Profile
-from noentenc.language_detection import LanguageDetector
-from noentenc.translation import Translator
-
-LanguageDetector("quality")
-Translator(Profile.BALANCE)
-```
-
-- **`speed`** is the default, so `LanguageDetector()` and `Translator()` already use it. It answers fastest and downloads least.
-- **`balance`** is much more accurate on languages beyond the most common ones, and still fast enough for large datasets.
-- **`quality`** gives the best output this package has. It is the slowest and downloads the most.
-
-| Profile | Detection | Translation, pairs without an Opus-MT model |
-|---|---|---|
-| `speed` | fastText `lid176`: 0.9 MB, 176 languages | SMaLL-100: 595 MB, 100 languages |
-| `balance` | fastText `openlid-v3`: 1.2 GB, 195 languages, GPL-3.0 | NLLB-200 600M at int8: 860 MB, 196 languages, CC-BY-NC-4.0 |
-| `quality` | fastText `glotlid`: 1.7 GB, 2102 languages | NLLB-200 600M at fp32: 3.5 GB, 196 languages, CC-BY-NC-4.0 |
-
-Every translation profile uses the dedicated Opus-MT model when the pair has one (66 directions). On those pairs it scored as well as NLLB-200 on average and is about 8× faster. Without a source language, Opus-MT and NLLB-200 can't be used, so every profile uses SMaLL-100.
-
-`openlid-v3` and `glotlid` return individual languages: Swahili comes back as `swh`, and Congo Swahili as `swc`, where `lid176` says `swa`. To get one code per macrolanguage, pass the model yourself with `collapse_macrolanguages=True`.
-
-Check the licences before you use `balance` or `quality` commercially. NLLB-200 is non-commercial (CC-BY-NC-4.0) and warns when it loads, and `openlid-v3` is GPL-3.0. [Benchmarks](benchmarks.md#profiles) has the accuracy and speed of each choice, and [choose_profile.py](examples/choose_profile.py) runs all three profiles.
-
-The three profiles often pick the same translation model. Opus-MT pairs use Opus-MT in every profile, and texts without a source language use SMaLL-100 in every profile. So `quality` only changes the output of other pairs. [Routing](benchmarks.md#routing) has the full table.
-
-### Plan, and set limits
-
-To see what a profile would download before it does, ask for a plan. It loads and downloads nothing.
-
-```python
-import noentenc
-
-plan = noentenc.plan("balance", translation=[("ja", "ca")])
-[(m.name, m.license, m.download_bytes >> 20, m.memory_bytes >> 20) for m in plan.models]
-# [('FastTextModel(openlid-v3)', 'GPL-3.0', 1175, 1142),
-#  ('NLLBModel(Xenova/nllb-200-distilled-600M)', 'CC-BY-NC-4.0', 869, 4057)]
-plan.missing_bytes  # what still has to download
-```
-
-`memory_bytes` is resident memory once loaded. `memory_basis` says whether that was measured (see [Memory](benchmarks.md#memory)) or estimated. `Translator(...).plan(target, source)` does the same for one pair, and `LanguageDetector(...).plan()` for a detector. `Translator.supports(target, source)` and `Translator.supported_languages()` say which pairs a profile covers.
-
-To keep a profile within your licence policy or download budget, pass `allowed_licenses` (SPDX identifiers) and `max_download_bytes`. A profile then skips a model that breaks them for its next choice. NLLB-200 gives way to SMaLL-100, and Opus-MT q4 gives way to the smaller Opus-MT int8. If nothing is left, the call raises `ModelConstraintError` before downloading.
-
-```python
-from noentenc.translation import Translator
-
-translator = Translator("quality", allowed_licenses=["MIT", "Apache-2.0", "CC-BY-4.0"])
-translator.translate(
-    "こんにちは", "ca", "ja"
-)  # SMaLL-100, not the non-commercial NLLB-200
-```
-
-`LanguageDetector`, `noentenc.plan` and `noentenc.prepare` take the same two arguments. With `source_language="auto"`, a text whose pair has no allowed model gets status `unsupported_source`.
-
-The models behind a profile may change between releases. If you need the same output every time, pass a model explicitly as shown below.
-
-## Choose a detection model
-
-Pass a model to `LanguageDetector`. Every backend returns the same ISO 639-3 labels, so you can swap one for another without touching the rest of your code.
-
-```python
-from noentenc.language_detection import (
-    FastTextModel,
-    LanguageDetector,
-    LinguaModel,
-    OnnxClassifierModel,
-)
-
-# Rare and low-resource languages: GlotLID knows 2102 (1.7 GB download).
-LanguageDetector(FastTextModel("glotlid"))
-
-# A small transformer trained on OpenLID: 201 languages, 25 MB. Needs `noentenc[onnx]`.
-LanguageDetector(OnnxClassifierModel("bert-openlid"))
-
-# You already know the text is one of a few languages. Needs `uv add 'noentenc[lingua]'`.
-LanguageDetector(LinguaModel(languages=["cat", "spa", "eng"]))
-```
-
-Start with the default. It's 0.9 MB, needs nothing beyond numpy, and labels about 400k short sentences per second. Lingua is much slower, but restricting the candidates helps on very short texts, where n-gram models struggle. The [README](../README.md#language-detection) lists every backend with its size and licence.
-
-## Choose a translation model
-
-Pass a model to `Translator` to use it for every call.
-
-```python
-from noentenc import Language
-from noentenc.translation import (
-    M2M100Model,
-    OpusMTModel,
-    Precision,
-    SMaLL100Model,
-    Translator,
-)
-
-# One direction, fastest. Check `OPUS_MT_PAIRS` for the 66 available directions.
-Translator(OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH))
-
-# Many directions with one model. The source language is optional.
-Translator(SMaLL100Model())
-
-# About as accurate as SMaLL-100, better into Chinese and Japanese but worse on
-# low-resource languages, and about 4x slower. It needs the source language.
-Translator(M2M100Model())
-
-# Pick a precision explicitly: fp32, int8 or q4, where the export has it.
-Translator(
-    OpusMTModel.from_pair(Language.ENGLISH, Language.GERMAN, precision=Precision.FP32)
-)
-```
-
-Every translation model also takes `num_threads=`, like `Translator` does for the models a profile loads (see [Threads](#threads)).
-
-If a model can't handle a pair, the call raises `UnsupportedLanguageError`.
-
-```python
-from noentenc import UnsupportedLanguageError
-
-english_to_spanish = Translator(
-    OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH)
-)
-
-try:
-    english_to_spanish.translate("Hello", Language.FRENCH)
-except UnsupportedLanguageError as error:
-    print(error)  # OpusMTModel cannot translate into <Language.FRENCH: 'fr'>
-```
-
 ## Work with DataFrames
 
 Both classes add a column to a pandas or polars DataFrame and return the new frame.
@@ -417,7 +280,166 @@ Stopping early, with `break`, `itertools.islice` or `close()`, reads no more inp
 
 Results arrive a chunk at a time. Wrap the iterator in `tqdm(..., total=n)` for a progress bar. To keep each result next to its input record, zip the stream with the records: `itertools.tee` the source, as [stream_translation.py](examples/stream_translation.py) does, and it buffers at most the chunk read ahead. [stream_detection.py](examples/stream_detection.py) labels a file line by line.
 
-## Run offline
+## Choose models and resources
+
+Everything above runs on the defaults: the `speed` profile, fastText `lid176` for detection, and Opus-MT or SMaLL-100 for translation. Read on when you need more accuracy on rare languages, a specific model or precision, a licence or download budget, bounded memory or threads, or a deployment without network access.
+
+### Trade speed for quality
+
+Pass a profile instead of a model and noentenc picks one for you. The three profiles are `"speed"`, `"balance"` and `"quality"`, and `Profile.SPEED`, `Profile.BALANCE` and `Profile.QUALITY` work too. A misspelled profile raises `ValueError`.
+
+```python
+from noentenc import Profile
+from noentenc.language_detection import LanguageDetector
+from noentenc.translation import Translator
+
+LanguageDetector("quality")
+Translator(Profile.BALANCE)
+```
+
+- **`speed`** is the default, so `LanguageDetector()` and `Translator()` already use it. It answers fastest and downloads least.
+- **`balance`** is much more accurate on languages beyond the most common ones, and still fast enough for large datasets.
+- **`quality`** gives the best output this package has. It is the slowest and downloads the most.
+
+| Profile | Detection | Translation, pairs without an Opus-MT model |
+|---|---|---|
+| `speed` | fastText `lid176`: 0.9 MB, 176 languages | SMaLL-100: 595 MB, 100 languages |
+| `balance` | fastText `openlid-v3`: 1.2 GB, 195 languages, GPL-3.0 | NLLB-200 600M at int8: 860 MB, 196 languages, CC-BY-NC-4.0 |
+| `quality` | fastText `glotlid`: 1.7 GB, 2102 languages | NLLB-200 600M at fp32: 3.5 GB, 196 languages, CC-BY-NC-4.0 |
+
+Every translation profile uses the dedicated Opus-MT model when the pair has one (66 directions). On those pairs it scored as well as NLLB-200 on average and is about 8× faster. Without a source language, Opus-MT and NLLB-200 can't be used, so every profile uses SMaLL-100.
+
+`openlid-v3` and `glotlid` return individual languages: Swahili comes back as `swh`, and Congo Swahili as `swc`, where `lid176` says `swa`. To get one code per macrolanguage, pass the model yourself with `collapse_macrolanguages=True`.
+
+Check the licences before you use `balance` or `quality` commercially. NLLB-200 is non-commercial (CC-BY-NC-4.0) and warns when it loads, and `openlid-v3` is GPL-3.0. [Benchmarks](benchmarks.md#profiles) has the accuracy and speed of each choice, and [choose_profile.py](examples/choose_profile.py) runs all three profiles.
+
+The three profiles often pick the same translation model. Opus-MT pairs use Opus-MT in every profile, and texts without a source language use SMaLL-100 in every profile. So `quality` only changes the output of other pairs. [Routing](benchmarks.md#routing) has the full table.
+
+#### Plan, and set limits
+
+To see what a profile would download before it does, ask for a plan. It loads and downloads nothing.
+
+```python
+import noentenc
+
+plan = noentenc.plan("balance", translation=[("ja", "ca")])
+[(m.name, m.license, m.download_bytes >> 20, m.memory_bytes >> 20) for m in plan.models]
+# [('FastTextModel(openlid-v3)', 'GPL-3.0', 1175, 1142),
+#  ('NLLBModel(Xenova/nllb-200-distilled-600M)', 'CC-BY-NC-4.0', 869, 4057)]
+plan.missing_bytes  # what still has to download
+```
+
+`memory_bytes` is resident memory once loaded. `memory_basis` says whether that was measured (see [Memory](benchmarks.md#memory)) or estimated. `Translator(...).plan(target, source)` does the same for one pair, and `LanguageDetector(...).plan()` for a detector. `Translator.supports(target, source)` and `Translator.supported_languages()` say which pairs a profile covers.
+
+To keep a profile within your licence policy or download budget, pass `allowed_licenses` (SPDX identifiers) and `max_download_bytes`. A profile then skips a model that breaks them for its next choice. NLLB-200 gives way to SMaLL-100, and Opus-MT q4 gives way to the smaller Opus-MT int8. If nothing is left, the call raises `ModelConstraintError` before downloading.
+
+```python
+from noentenc.translation import Translator
+
+translator = Translator("quality", allowed_licenses=["MIT", "Apache-2.0", "CC-BY-4.0"])
+translator.translate(
+    "こんにちは", "ca", "ja"
+)  # SMaLL-100, not the non-commercial NLLB-200
+```
+
+`LanguageDetector`, `noentenc.plan` and `noentenc.prepare` take the same two arguments. With `source_language="auto"`, a text whose pair has no allowed model gets status `unsupported_source`.
+
+The models behind a profile may change between releases. If you need the same output every time, pass a model explicitly as shown below.
+
+### Choose a detection model
+
+Pass a model to `LanguageDetector`. Every backend returns the same ISO 639-3 labels, so you can swap one for another without touching the rest of your code.
+
+```python
+from noentenc.language_detection import (
+    FastTextModel,
+    LanguageDetector,
+    LinguaModel,
+    OnnxClassifierModel,
+)
+
+# Rare and low-resource languages: GlotLID knows 2102 (1.7 GB download).
+LanguageDetector(FastTextModel("glotlid"))
+
+# A small transformer trained on OpenLID: 201 languages, 25 MB. Needs `noentenc[onnx]`.
+LanguageDetector(OnnxClassifierModel("bert-openlid"))
+
+# You already know the text is one of a few languages. Needs `noentenc[lingua]`.
+LanguageDetector(LinguaModel(languages=["cat", "spa", "eng"]))
+```
+
+Start with the default. It's 0.9 MB, needs nothing beyond numpy, labels an unseen sentence in about 0.1 ms, and about 22k paragraphs per second in batches. Lingua is much slower, but restricting the candidates helps on very short texts, where n-gram models struggle. The [README](../README.md#language-detection) lists every backend with its size and licence.
+
+### Choose a translation model
+
+Pass a model to `Translator` to use it for every call.
+
+```python
+from noentenc import Language
+from noentenc.translation import (
+    M2M100Model,
+    OpusMTModel,
+    Precision,
+    SMaLL100Model,
+    Translator,
+)
+
+# One direction, fastest. Check `OPUS_MT_PAIRS` for the 66 available directions.
+Translator(OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH))
+
+# Many directions with one model. The source language is optional.
+Translator(SMaLL100Model())
+
+# About as accurate as SMaLL-100, better into Chinese and Japanese but worse on
+# low-resource languages, and about 4x slower. It needs the source language.
+Translator(M2M100Model())
+
+# Pick a precision explicitly: fp32, int8 or q4, where the export has it.
+Translator(
+    OpusMTModel.from_pair(Language.ENGLISH, Language.GERMAN, precision=Precision.FP32)
+)
+```
+
+Every translation model also takes `num_threads=`, like `Translator` does for the models a profile loads (see [Threads](#threads)).
+
+If a model can't handle a pair, the call raises `UnsupportedLanguageError`.
+
+```python
+from noentenc import UnsupportedLanguageError
+
+english_to_spanish = Translator(
+    OpusMTModel.from_pair(Language.ENGLISH, Language.SPANISH)
+)
+
+try:
+    english_to_spanish.translate("Hello", Language.FRENCH)
+except UnsupportedLanguageError as error:
+    print(error)  # OpusMTModel cannot translate into <Language.FRENCH: 'fr'>
+```
+
+### Memory
+
+A `Translator` loads a model the first time a pair needs it and keeps it for later calls. It keeps at most two by default. When a pair needs a third, the least recently used model is dropped first, and it's loaded again if a later call needs it. Each one takes 0.6 to 1.2 GB of RAM for Opus-MT and SMaLL-100, and up to 4 GB for NLLB-200, far more than its download.
+
+```python
+translator = Translator(
+    max_loaded_models=4
+)  # fewer reloads, more memory; None for no limit
+translator.loaded_models  # the models it holds right now
+translator.unload()  # free them; the next call loads what it needs again
+```
+
+### Threads
+
+By default onnxruntime gives each translation model every physical core. That's the fastest setup for one process, but when several workers share a machine they compete for the same cores. Give each one its share:
+
+```python
+translator = Translator(num_threads=2)
+```
+
+The cap applies to every model the translator loads. A model you build yourself takes `num_threads=` too, and so do the ONNX detection models (`OnnxClassifierModel("bert-openlid", num_threads=2)`). The fastText models the detection profiles use don't run on onnxruntime and have no thread setting. [parallel_workers.py](examples/parallel_workers.py) splits a job across processes this way.
+
+### Run offline
 
 Inference never touches the network. Only downloading weights does, and that happens the first time a model is used. To deploy somewhere without network access, download the weights ahead of time with `prepare`, then point the same classes at them with `only_local_files=True`.
 
