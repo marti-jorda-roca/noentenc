@@ -63,7 +63,8 @@ def test_detect_reads_stdin_and_files_line_by_line(cache: Path, tmp_path: Path) 
     result = run("detect", *offline(cache), stdin=lines)
     assert result.stdout.splitlines() == ["deu", "und", "spa"]
     path = tmp_path / "texts.txt"
-    path.write_text(lines, encoding="utf-8")
+    # Bytes, so Windows doesn't turn "\n" into "\r\n" and "\r\n" into "\r\r\n".
+    path.write_bytes(lines.encode())
     assert run("detect", *offline(cache), "--file", path).stdout == result.stdout
     from_dash = run("detect", *offline(cache), "--file", "-", stdin=lines)
     assert from_dash.stdout == result.stdout
