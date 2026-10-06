@@ -110,7 +110,7 @@ Translation lists the multilingual models, then one Opus-MT model per pair. A mo
 
 ```bash
 noentenc info
-# Version:     0.3.0
+# Version:     0.4.0
 # Cache root:  /home/me/.cache/noentenc (default)
 # Detection:   /home/me/.cache/noentenc
 # Translation: /home/me/.cache/noentenc/hub
