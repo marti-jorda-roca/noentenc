@@ -467,6 +467,8 @@ One directory holds both kinds of weights. The cache root is the `cache_dir` you
 
 Downloads show a progress bar (`TQDM_DISABLE=1` hides it). Detection downloads give up on a connection that stays silent for 30 seconds (`NOENTENC_DOWNLOAD_TIMEOUT` changes it), retry up to 4 times on timeouts, dropped connections and server errors, and resume where they stopped. Translation downloads use huggingface-hub, which has its own retries and its own `HF_HUB_DOWNLOAD_TIMEOUT`.
 
+From a shell or a Dockerfile, `noentenc download --pair en:es --pair :en --cache-dir /models` does the same (see [Command line](cli.md#download-ahead-of-time)).
+
 If a file gets corrupted, run `prepare` again: it checks the checksummed detection files and downloads any that don't match. `prepare(..., force=True)` downloads everything again, translation models included. Deleting the file and running `prepare` works too.
 
 ## Next steps

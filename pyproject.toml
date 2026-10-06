@@ -21,6 +21,10 @@ dependencies = [
     "tqdm>=4.70.1",
 ]
 
+# Installed with every wheel; it asks for the `cli` extra when click is missing.
+[project.scripts]
+noentenc = "noentenc.cli:main"
+
 [project.optional-dependencies]
 translation = [
     "huggingface-hub>=1.33.0",
@@ -38,7 +42,9 @@ polars = ["polars>=1.44.2"]
 lingua = ["lingua-language-detector>=2.1.1"]
 cld3 = ["cld3-py>=3.1"]
 heliport = ["heliport>=1.0.1; sys_platform != 'win32'"]
-all = ["noentenc[translation,onnx,pandas,polars,lingua,cld3,heliport]"]
+# The `noentenc` command.
+cli = ["click>=8.5.0"]
+all = ["noentenc[translation,onnx,pandas,polars,lingua,cld3,heliport,cli]"]
 
 [build-system]
 requires = ["uv_build>=0.12.22,<0.13.0"]

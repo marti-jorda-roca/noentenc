@@ -44,6 +44,7 @@ noentenc detects languages and translates text in Python, on CPU, without torch.
 |---|---|
 | [quickstart.md](quickstart.md) | Learn the API: detect, translate, abstain when unsure, handle long text, keep links and placeholders, pick a profile or a model, work with DataFrames, stream large inputs and run offline. |
 | [benchmarks.md](benchmarks.md) | See what the first install and call cost, compare models on speed, memory and accuracy, choose detection thresholds, and see why each profile uses the models it does. |
+| [cli.md](cli.md) | Detect, translate, download models and inspect the cache from the shell with the `noentenc` command, and use it in pipelines. |
 | [custom-models.md](custom-models.md) | Load your own weights, wrap another detector or translator, add an ONNX encoder-decoder, or contribute a model to noentenc. |
 
 The project README has the [model tables](../README.md#models) with each model's size and licence, and the [extras](../README.md#install) each backend needs.
@@ -67,6 +68,7 @@ The project README has the [model tables](../README.md#models) with each model's
 | Process a file or stream too large to hold in memory | [Stream large inputs](quickstart.md#stream-large-inputs), [Streaming benchmark](benchmarks.md#streaming) |
 | Share a machine's cores between several workers | [Threads](quickstart.md#threads) |
 | Run without network access | [Run offline](quickstart.md#run-offline) |
+| Detect or translate from the shell, or prefetch models in a build | [Command line](cli.md) |
 | Use my own model | [Custom models](custom-models.md) |
 
 ## Examples
