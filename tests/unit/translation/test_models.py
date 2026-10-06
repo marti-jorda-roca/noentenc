@@ -243,14 +243,31 @@ def test_every_sentence_of_a_long_text_reaches_inference(m2m_dir: Path) -> None:
     # 121 tokens, far over the 16-token limit, in sentences of 3 tokens.
     text = " ".join(["Hello world end."] * 40) + " Hello mundo end."
     assert model.predict(text, EN) == text
-    last = token_ids(model, ["__en__", "Hello", "mundo", "end.", "</s>"])
-    fed = [
+    # Each distinct sentence reaches the model whole, once.
+    assert fed_rows() == [
+        token_ids(model, ["__en__", "Hello", "world", "end.", "</s>"]),
+        token_ids(model, ["__en__", "Hello", "mundo", "end.", "</s>"]),
+    ]
+
+
+def test_repeated_sentences_are_translated_once(m2m_dir: Path) -> None:
+    model = SMaLL100Model(m2m_dir)
+    long = " ".join(["hello"] * 40)
+    texts = ["hello end. mundo", "mundo", f"{long}\nmundo", long]
+    results = model.predict_batch_detailed(texts, EN, truncate=True)
+    assert len(fed_rows()) == 3
+    assert [r.text for r in results[:2]] == texts[:2]
+    # Every text holding the truncated sentence reports it.
+    assert [r.input_truncated for r in results] == [False, False, True, True]
+
+
+def fed_rows() -> list[list[int]]:
+    """The unpadded token ids of every row the engine was given, in order."""
+    return [
         row[mask == 1].tolist()
         for ids, masks, _ in FakeEngine.calls
         for row, mask in zip(ids, masks, strict=True)
     ]
-    assert len(fed) == 41
-    assert any(row == last for row in fed)
 
 
 def test_whitespace_between_sentences_survives(m2m_dir: Path) -> None:

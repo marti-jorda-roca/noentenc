@@ -184,7 +184,8 @@ class Seq2SeqModel(BaseModel):
         """Translate each text sentence by sentence, keeping the whitespace between them.
 
         A sentence longer than the model reads raises `InputTooLongError`, or with
-        `truncate` loses its end. `batch_size` counts sentences.
+        `truncate` loses its end. `batch_size` counts sentences. A sentence that occurs
+        more than once in `texts` is translated once.
         """
         check_batch_size(batch_size)
         target = Language(target_language)
@@ -192,22 +193,22 @@ class Seq2SeqModel(BaseModel):
         self.schema.validate(source, target, type(self).__name__)
 
         documents = [split_sentences(text) for text in texts]
-        sentences = [
-            sentence for document in documents for sentence in document.sentences
-        ]
+        # Each distinct sentence, in order of first appearance, and its position.
+        slots: dict[str, int] = {}
+        for document in documents:
+            for sentence in document.sentences:
+                slots.setdefault(sentence, len(slots))
         outputs, truncated, exhausted = self._translate_sentences(
-            sentences, source, target, batch_size, truncate
+            list(slots), source, target, batch_size, truncate
         )
         results: list[Translation] = []
-        start = 0
         for document in documents:
-            span = slice(start, start + len(document.sentences))
-            start = span.stop
+            at = [slots[sentence] for sentence in document.sentences]
             results.append(
                 Translation(
-                    document.join(outputs[span]),
-                    input_truncated=any(truncated[span]),
-                    output_limit_reached=any(exhausted[span]),
+                    document.join([outputs[i] for i in at]),
+                    input_truncated=any(truncated[i] for i in at),
+                    output_limit_reached=any(exhausted[i] for i in at),
                 )
             )
         return results

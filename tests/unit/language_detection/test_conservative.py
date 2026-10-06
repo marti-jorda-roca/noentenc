@@ -203,6 +203,35 @@ def test_detect_dataset_status_column() -> None:
     assert scored["scores"][0][0]["language"] == "eng"
 
 
+@pytest.mark.parametrize("candidates", [None, ["spa", "cat"]])
+def test_detect_dataset_scores_and_statuses_share_one_model_pass(
+    candidates: list[str] | None,
+) -> None:
+    model = ScriptedModel({"eng": 0.6, "spa": 0.3, "cat": 0.1})
+    detector = LanguageDetector(
+        model, min_score=0.5, min_letters=4, candidates=candidates
+    )
+    texts = ["hello there", "", "123", "hi", "bon dia"]
+    out = detector.detect_dataset(
+        pl.DataFrame({"text": texts}),
+        "text",
+        "scores",
+        with_score=True,
+        top_k=1,
+        show_progress=False,
+        status_column="status",
+    )
+    # The texts the base class doesn't label by rule reach the model once.
+    assert model.seen == ["hello there", "hi", "bon dia"]
+    scores = detector.detect_batch(texts, with_score=True, top_k=1)
+    detections = detector.detect_batch(texts, detailed=True)
+    assert out["scores"].to_list() == [
+        [{"language": label, "score": score} for label, score in s.items()]
+        for s in scores
+    ]
+    assert out["status"].to_list() == [str(d.status) for d in detections]
+
+
 # Candidate restriction on every backend that scores every language.
 
 

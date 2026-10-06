@@ -13,6 +13,19 @@
   </p>
 </div>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmark-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/benchmark-light.svg">
+  <img src="docs/assets/benchmark-light.svg" alt="noentenc against the original packages: 5.5× smaller install, 4× faster start-up, 1.9× the translation throughput, 470× the langid throughput" width="100%">
+</picture>
+
+- **No torch, no GPU.** Detection needs only numpy and tqdm, and translation runs on onnxruntime.
+- **Same answers as the originals.** `lid176` and `langid` return the same labels as `fasttext` and `langid.py` on all 245,000 texts tested. Opus-MT scores within 0.3 BLEU of transformers.
+- **One API.** 12 detection models and 4 translation model families sit behind two classes, and every detector returns ISO 639-3 labels.
+- **Built for datasets.** Pass a string, a list, a pandas or polars column, or stream a file of any size with flat memory.
+
+The chart and table were measured on an Apple M3. The [benchmarks](docs/benchmarks.md#against-the-original-implementations) give the method and every number, including where the original package is faster (C++ `fasttext` on one text at a time). New to noentenc? Start with the [quickstart](docs/quickstart.md).
+
 ```python
 from noentenc.language_detection import LanguageDetector
 from noentenc.translation import Translator
@@ -32,14 +45,6 @@ Translator().translate_batch(
 )
 # ['Hey, when does my order arrive?', "The link doesn't work.", 'Thanks, it works now.']
 ```
-
-- **Fast on the defaults.** `LanguageDetector()` labels a sentence it hasn't seen in about 0.12 ms, and about 22k paragraphs a second in batches. Once a sentence's words are cached it takes about 15 µs. `Translator()` translates a sentence in about 60 ms with a dedicated Opus-MT model. These numbers are from an Apple M3; see [benchmarks](docs/benchmarks.md).
-- **Small, and cheap to start.** Detection installs 23 MB of packages, needs only numpy and tqdm, and its first call downloads a 0.9 MB model in about a second. With translation, the install is 127 MB, and the example above downloads 554 MB of weights on its first run (about 20 s here). After that a new process gives its first result in 1.2 s. There is no torch, transformers or GPU dependency. See [First use](docs/benchmarks.md#first-use).
-- **Faster than the originals.** `langid` runs up to 470× faster than `langid.py`. Against the C++ `fasttext` package, `lid176` labels batches of short sentences 2× faster but is 4× slower one text at a time. The ONNX models answer a single text up to 5.8× faster than transformers + PyTorch. Accuracy is the same. See [the comparison](docs/benchmarks.md#against-the-original-implementations).
-- **One API, many models.** 12 detection models and 4 translation model families sit behind the same two classes. Swapping one is a one-line change, and every detector returns the same ISO 639-3 labels. The optional `heliport` backend labels a short sentence in 2.5 µs, but it's GPL-3.0 and has no Windows wheel.
-- **Built for datasets.** You can pass a single string, a list or a pandas or polars column, or stream a file of any length with flat memory.
-
-New to noentenc? The [quickstart](docs/quickstart.md) covers install, detection and translation on the defaults first, then choosing models, memory and offline use.
 
 ## Install
 
@@ -306,4 +311,4 @@ make unit-tests
 make integration-tests   # tests/integrations; downloads real weights
 ```
 
-`scripts/benchmark_lid.py` and `scripts/benchmark_translation.py` reproduce the speed numbers, and `scripts/benchmark_vs_reference.py` the comparison with the original implementations. `scripts/measure_first_use.py` measures install, first-call and start-up costs from a built wheel, and `scripts/smoke_quickstart.py` runs the README quickstart against one, as CI does. `scripts/make_fasttext_fixtures.py` regenerates the fastText parity fixtures with the reference `fasttext` package. That package needs Python 3.12, and the script's docstring has the command. `scripts/make_langid_fixtures.py` does the same for langid with the reference `langid` package.
+`scripts/benchmark_lid.py` and `scripts/benchmark_translation.py` reproduce the speed numbers, and `scripts/benchmark_vs_reference.py` the comparison with the original implementations. `scripts/make_benchmark_chart.py` redraws the chart at the top of this README from those numbers. `scripts/measure_first_use.py` measures install, first-call and start-up costs from a built wheel, and `scripts/smoke_quickstart.py` runs the README quickstart against one, as CI does. `scripts/make_fasttext_fixtures.py` regenerates the fastText parity fixtures with the reference `fasttext` package. That package needs Python 3.12, and the script's docstring has the command. `scripts/make_langid_fixtures.py` does the same for langid with the reference `langid` package.

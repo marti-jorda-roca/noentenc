@@ -6,7 +6,6 @@ from tqdm import tqdm
 
 from noentenc._batching import (
     DEFAULT_CHUNK_SIZE,
-    check_batch_size,
     check_int,
     check_texts,
     stream_chunks,
@@ -120,6 +119,9 @@ class LanguageDetector:
 
     ``detailed=True`` returns a ``Detection`` with the status that explains the label.
 
+    ``batch_size=None`` (the default) uses the backend's ``default_batch_size``: 256 texts
+    for fastText, 32 for the others.
+
     A profile downloads its model into ``cache_dir`` (see ``noentenc._cache`` for the
     default), or with ``only_local_files`` only reads it from there, failing at once when
     it is missing. ``noentenc.prepare`` downloads it ahead of time. For a ``model`` you
@@ -216,14 +218,14 @@ class LanguageDetector:
         detailed: bool = False,
     ) -> str | dict[str, float] | Detection:
         """The language of ``text``, its ``top_k`` highest-scoring languages, or a ``Detection``."""
-        (result,) = self._detect([text], 32, with_score, top_k, detailed)
+        (result,) = self._detect([text], None, with_score, top_k, detailed)
         return result
 
     @overload
     def detect_batch(
         self,
         texts: list[str],
-        batch_size: int = 32,
+        batch_size: int | None = None,
         with_score: Literal[False] = False,
         top_k: int | None = DEFAULT_TOP_K,
         *,
@@ -234,7 +236,7 @@ class LanguageDetector:
     def detect_batch(
         self,
         texts: list[str],
-        batch_size: int = 32,
+        batch_size: int | None = None,
         *,
         with_score: Literal[True],
         top_k: int | None = DEFAULT_TOP_K,
@@ -245,7 +247,7 @@ class LanguageDetector:
     def detect_batch(
         self,
         texts: list[str],
-        batch_size: int = 32,
+        batch_size: int | None = None,
         with_score: Literal[False] = False,
         top_k: int | None = DEFAULT_TOP_K,
         *,
@@ -255,7 +257,7 @@ class LanguageDetector:
     def detect_batch(
         self,
         texts: list[str],
-        batch_size: int = 32,
+        batch_size: int | None = None,
         with_score: bool = False,
         top_k: int | None = DEFAULT_TOP_K,
         *,
@@ -269,7 +271,7 @@ class LanguageDetector:
     def detect_stream(
         self,
         texts: Iterable[str],
-        batch_size: int = 32,
+        batch_size: int | None = None,
         with_score: Literal[False] = False,
         top_k: int | None = DEFAULT_TOP_K,
         *,
@@ -281,7 +283,7 @@ class LanguageDetector:
     def detect_stream(
         self,
         texts: Iterable[str],
-        batch_size: int = 32,
+        batch_size: int | None = None,
         *,
         with_score: Literal[True],
         top_k: int | None = DEFAULT_TOP_K,
@@ -293,7 +295,7 @@ class LanguageDetector:
     def detect_stream(
         self,
         texts: Iterable[str],
-        batch_size: int = 32,
+        batch_size: int | None = None,
         with_score: Literal[False] = False,
         top_k: int | None = DEFAULT_TOP_K,
         *,
@@ -304,7 +306,7 @@ class LanguageDetector:
     def detect_stream(
         self,
         texts: Iterable[str],
-        batch_size: int = 32,
+        batch_size: int | None = None,
         with_score: bool = False,
         top_k: int | None = DEFAULT_TOP_K,
         *,
@@ -333,7 +335,7 @@ class LanguageDetector:
         dataset: pl.DataFrame,
         target_column: str,
         result_column: str,
-        batch_size: int = 32,
+        batch_size: int | None = None,
         with_score: bool = False,
         top_k: int | None = DEFAULT_TOP_K,
         show_progress: bool = True,
@@ -347,7 +349,7 @@ class LanguageDetector:
         dataset: pd.DataFrame,
         target_column: str,
         result_column: str,
-        batch_size: int = 32,
+        batch_size: int | None = None,
         with_score: bool = False,
         top_k: int | None = DEFAULT_TOP_K,
         show_progress: bool = True,
@@ -360,7 +362,7 @@ class LanguageDetector:
         dataset: pl.DataFrame | pd.DataFrame,
         target_column: str,
         result_column: str,
-        batch_size: int = 32,
+        batch_size: int | None = None,
         with_score: bool = False,
         top_k: int | None = DEFAULT_TOP_K,
         show_progress: bool = True,
@@ -377,8 +379,9 @@ class LanguageDetector:
         The whole column and its labels are held in memory; for more rows than fit, use
         ``detect_stream``.
         """
-        check_batch_size(batch_size)
+        check_int("batch_size", batch_size, optional=True)
         check_int("top_k", top_k, optional=True)
+        size = self.model._batch_size(batch_size)
         texts = [
             text if isinstance(text, str) else ""
             for text in column_values(dataset, target_column)
@@ -388,17 +391,20 @@ class LanguageDetector:
         with tqdm(
             total=len(texts), desc="Detecting language", disable=not show_progress
         ) as progress:
-            for start in range(0, len(texts), batch_size):
-                chunk = texts[start : start + batch_size]
-                if status_column is not None:
-                    detections = self._detect_detailed(chunk, batch_size)
-                    statuses += [str(d.status) for d in detections]
-                if with_score or status_column is None:
+            for start in range(0, len(texts), size):
+                chunk = texts[start : start + size]
+                if status_column is None:
                     results += self._detect(
-                        chunk, batch_size, with_score, top_k, detailed=False
+                        chunk, size, with_score, top_k, detailed=False
                     )
+                    detections = []
+                elif with_score:
+                    scores, detections = self._scored_detections(chunk, size, top_k)
+                    results += scores
                 else:
+                    detections = self._detect_detailed(chunk, size)
                     results += [d.language for d in detections]
+                statuses += [str(d.status) for d in detections]
                 progress.update(len(chunk))
         if with_score:
             results = [
@@ -413,7 +419,7 @@ class LanguageDetector:
     def _detect(
         self,
         texts: list[str],
-        batch_size: int,
+        batch_size: int | None,
         with_score: bool,
         top_k: int | None,
         detailed: bool,
@@ -428,7 +434,7 @@ class LanguageDetector:
         return self.model.predict_batch(texts, batch_size=batch_size)
 
     def _scores(
-        self, texts: list[str], batch_size: int, top_k: int | None
+        self, texts: list[str], batch_size: int | None, top_k: int | None
     ) -> list[dict[str, float]]:
         if self.policy.candidates is None:
             return self.model.predict_batch_score(
@@ -442,7 +448,26 @@ class LanguageDetector:
         ]
         return [dict(list(scores.items())[:top_k]) for scores in restricted]
 
-    def _detect_detailed(self, texts: list[str], batch_size: int) -> list[Detection]:
+    def _scored_detections(
+        self, texts: list[str], batch_size: int | None, top_k: int | None
+    ) -> tuple[list[dict[str, float]], list[Detection]]:
+        """``_scores`` and ``_detect_detailed`` of ``texts``, running the model once."""
+        policy = self.policy
+        # `decide` needs the top two scores among the candidates.
+        k = None if policy.candidates is not None or top_k is None else max(top_k, 2)
+        model_scores = self.model.predict_batch_score(
+            texts, batch_size=batch_size, top_k=k
+        )
+        scores: list[dict[str, float]] = []
+        detections: list[Detection] = []
+        for text, text_scores in zip(texts, model_scores, strict=True):
+            scores.append(dict(list(policy.restrict(text_scores).items())[:top_k]))
+            detections.append(policy.before_model(text) or policy.decide(text_scores))
+        return scores, detections
+
+    def _detect_detailed(
+        self, texts: list[str], batch_size: int | None
+    ) -> list[Detection]:
         results = [self.policy.before_model(text) for text in texts]
         pending = [i for i, result in enumerate(results) if result is None]
         scores = self.model.predict_batch_score(
@@ -454,9 +479,9 @@ class LanguageDetector:
 
 
 def _check_arguments(
-    batch_size: int, with_score: bool, top_k: int | None, detailed: bool
+    batch_size: int | None, with_score: bool, top_k: int | None, detailed: bool
 ) -> None:
-    check_batch_size(batch_size)
+    check_int("batch_size", batch_size, optional=True)
     check_int("top_k", top_k, optional=True)
     if with_score and detailed:
         raise ValueError("pass with_score or detailed, not both")

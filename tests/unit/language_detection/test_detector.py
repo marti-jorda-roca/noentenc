@@ -101,6 +101,26 @@ def test_empty_and_blank_batches(detector: LanguageDetector) -> None:
     assert detector.detect_dataset(empty, "text", "lang")["lang"].to_list() == []
 
 
+def test_batch_size_none_uses_the_backend_default(
+    detector: LanguageDetector, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert FastTextModel.default_batch_size == 256
+    model = detector.model
+    sizes: list[int] = []
+    run = model._predict_chunk
+
+    def recording(texts: list[str]) -> list[str]:
+        sizes.append(len(texts))
+        return run(texts)
+
+    monkeypatch.setattr(model, "_predict_chunk", recording)
+    monkeypatch.setattr(model, "default_batch_size", 2)
+    detector.detect_batch(["el perro corrió"] * 5)
+    assert sizes == [2, 2, 1]
+    detector.detect_batch(["el perro corrió"] * 5, batch_size=4)
+    assert sizes[3:] == [4, 1]
+
+
 def test_batching_does_not_change_results(
     detector: LanguageDetector, sentences: list[str]
 ) -> None:
