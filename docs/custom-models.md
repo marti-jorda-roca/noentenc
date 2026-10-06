@@ -46,7 +46,7 @@ Subclass `noentenc.language_detection.BaseModel` and implement:
 | `_predict_chunk(texts)` | The top label for each text. |
 | `_predict_score_chunk(texts, top_k)` | One `{label: score}` dict per text, sorted by descending score, with at most `top_k` entries (`None` means all). |
 
-The base class handles the rest: `predict`, `predict_score`, the batched variants, splitting input into `batch_size` chunks and returning results in input order. Empty and whitespace-only texts get `"und"`, and texts without letters outside URLs and email addresses get `"zxx"`, without reaching your model, so the chunk methods only ever see real text. If your `predict_score` does not score every label (it reports only the top spans or label), set `scores_every_label = False` so `LanguageDetector(candidates=...)` refuses it.
+The base class handles the rest: `predict`, `predict_score`, the batched variants, splitting input into `batch_size` chunks and returning results in input order. Empty and whitespace-only texts get `"und"`, and texts without letters outside URLs and email addresses get `"zxx"`, without reaching your model, so the chunk methods only ever see real text. If your `predict_score` does not score every label (it reports only the top spans or label), set `scores_every_label = False` so `LanguageDetector(candidates=...)` refuses it. `batch_size=None`, the default, splits input into `default_batch_size` texts: 32 unless your class sets another value. Raise it when your model has a fixed cost per call.
 
 ```python
 from noentenc.language_detection import BaseModel, LanguageDetector

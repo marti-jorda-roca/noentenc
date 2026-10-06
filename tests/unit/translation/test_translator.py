@@ -18,6 +18,7 @@ from noentenc.languages import (
 )
 from noentenc.profiles import Profile
 from noentenc.translation import _routing as routing_module
+from noentenc.translation import base as translator_module
 from noentenc.translation.base import Translator
 from noentenc.translation.models._seq2seq import Seq2SeqModel
 from noentenc.translation.models.base import (
@@ -69,6 +70,20 @@ def test_translate_dataset_polars_keeps_nulls_and_order(translator: Translator) 
     assert result["translated"].to_list() == ["A:en", None, "C:en"]
     assert result.schema["translated"] == pl.String
     assert "translated" not in frame.columns
+
+
+def test_translate_dataset_sends_large_chunks_sorted_by_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(translator_module, "_PROGRESS_CHUNK_SIZE", 3)
+    model = UpperModel()
+    texts = ["ccc", "a", "bbbb", "dd", "e"]
+    out = Translator(model).translate_dataset(
+        pl.DataFrame({"text": texts}), "text", "out", EN, batch_size=1
+    )
+    assert out["out"].to_list() == [f"{text.upper()}:en" for text in texts]
+    # Not one call per `batch_size` texts: the model sorts sentences within a call.
+    assert model.batches == [["a", "e", "dd"], ["ccc", "bbbb"]]
 
 
 def test_translate_dataset_pandas_keeps_nulls_and_order(translator: Translator) -> None:

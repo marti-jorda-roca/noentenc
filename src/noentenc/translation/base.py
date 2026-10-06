@@ -64,6 +64,10 @@ AUTO_DETECTION_SETTINGS: dict[str, float] = {"min_letters": 4, "min_score": 0.5}
 
 _NO_LINGUISTIC_CONTENT = "zxx"
 
+# Texts translated between progress updates. Chunks of `batch_size` texts made
+# `translate_dataset` about 35% slower than `translate_batch` on the same texts.
+_PROGRESS_CHUNK_SIZE = DEFAULT_CHUNK_SIZE
+
 
 class SourceLanguageError(UnsupportedLanguageError):
     """With `unknown_source="raise"`, a text's language couldn't be used."""
@@ -672,7 +676,7 @@ class Translator:
         pending = [i for i, text in enumerate(texts) if not is_blank(text)]
         if auto:
             groups = self._auto_groups(
-                texts, pending, target, batch_size, unknown_source, results, offset
+                texts, pending, target, unknown_source, results, offset
             )
         elif pending and source != target:
             key, load = self._route(source, target)
@@ -686,9 +690,16 @@ class Translator:
         for group in sorted(groups, key=lambda g: order[g.key]):
             model = group.load()
             name = _model_name(model)
-            chunk = len(group.indices) if progress is None else batch_size
-            for start in range(0, len(group.indices), chunk):
-                indices = group.indices[start : start + chunk]
+            indices_left = group.indices
+            chunk = len(indices_left)
+            if progress is not None:
+                # Reporting progress splits the texts into chunks, and the model only
+                # sorts sentences by length within a chunk. Ordering the texts by length
+                # first, in large chunks, keeps batches about as even as in one call.
+                indices_left = sorted(indices_left, key=lambda i: len(texts[i]))
+                chunk = _PROGRESS_CHUNK_SIZE
+            for start in range(0, len(indices_left), chunk):
+                indices = indices_left[start : start + chunk]
                 translated = self._run(
                     model,
                     [texts[i] for i in indices],
@@ -737,7 +748,6 @@ class Translator:
         texts: list[str],
         pending: list[int],
         target: Language,
-        batch_size: int,
         unknown_source: UnknownSourcePolicy,
         results: list[Translation],
         offset: int,
@@ -747,8 +757,9 @@ class Translator:
         Fills `results` for the texts that won't be translated, and raises before any
         model loads when `unknown_source="raise"` meets a text it can't translate.
         """
+        # The detector's own batch size: `batch_size` counts sentences for translation.
         detections = self.detector.detect_batch(
-            [texts[i] for i in pending], batch_size=batch_size, detailed=True
+            [texts[i] for i in pending], detailed=True
         )
         by_source: dict[Language | None, list[int]] = {}
         unusable: list[tuple[int, TranslationStatus]] = []

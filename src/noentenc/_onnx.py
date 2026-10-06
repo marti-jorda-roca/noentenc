@@ -21,6 +21,10 @@ def create_session(
     options.graph_optimization_level = runtime.GraphOptimizationLevel.ORT_ENABLE_ALL
     options.execution_mode = runtime.ExecutionMode.ORT_SEQUENTIAL
     options.inter_op_num_threads = 1
+    # The arena keeps each session's peak working memory for good; plain allocations
+    # give it back. Opus-MT held ~240 MB (17%) less after 600 sentences, and speed moved
+    # less than run-to-run noise on an M3 (medians within 6%).
+    options.enable_cpu_mem_arena = False
     if num_threads is not None:
         options.intra_op_num_threads = num_threads
     return runtime.InferenceSession(

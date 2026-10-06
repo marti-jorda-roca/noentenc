@@ -41,6 +41,9 @@ class BaseModel(ABC):
     # Whether `predict_score(text, top_k=None)` scores every label, which restricting the
     # candidate languages needs. Backends that report only their top spans or label don't.
     scores_every_label: bool = True
+    # Texts per batch when the caller passes `batch_size=None`. Transformers pad each
+    # batch, so they keep it small; backends with a fixed cost per batch raise it.
+    default_batch_size: int = 32
     _mapper: LabelMapper
 
     def __init__(
@@ -82,25 +85,31 @@ class BaseModel(ABC):
             return {label: 1.0}
         return self._predict_score_chunk([text], top_k)[0]
 
-    def predict_batch(self, texts: list[str], batch_size: int = 32) -> list[str]:
+    def predict_batch(
+        self, texts: list[str], batch_size: int | None = None
+    ) -> list[str]:
         return _run_batched(
             texts,
-            batch_size,
+            self._batch_size(batch_size),
             self._predict_chunk,
             lambda label: label,
             self.sort_batches_by_length,
         )
 
     def predict_batch_score(
-        self, texts: list[str], batch_size: int = 32, top_k: int | None = None
+        self, texts: list[str], batch_size: int | None = None, top_k: int | None = None
     ) -> list[dict[str, float]]:
         return _run_batched(
             texts,
-            batch_size,
+            self._batch_size(batch_size),
             lambda chunk: self._predict_score_chunk(chunk, top_k),
             lambda label: {label: 1.0},
             self.sort_batches_by_length,
         )
+
+    def _batch_size(self, batch_size: int | None) -> int:
+        """`batch_size`, or this backend's default when it is None."""
+        return self.default_batch_size if batch_size is None else batch_size
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(model={self.model!r})"
