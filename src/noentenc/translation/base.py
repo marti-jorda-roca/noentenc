@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING, Final, Literal, overload
 
 from tqdm import tqdm
 
-from noentenc._batching import check_batch_size, check_int, check_texts, is_blank
+from noentenc._batching import (
+    DEFAULT_CHUNK_SIZE,
+    check_batch_size,
+    check_int,
+    check_texts,
+    is_blank,
+    stream_chunks,
+)
 from noentenc._dataframe import column_values, with_column
 from noentenc._plan import Constraints, Plan
 from noentenc.languages import (
@@ -28,7 +35,7 @@ from noentenc.translation.models.base import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
     from pathlib import Path
 
     import pandas as pd
@@ -102,12 +109,17 @@ class Translator:
     pair needs another one, the least recently used is dropped first, and loaded again if a
     later call needs it. A higher limit saves reloads when calls alternate between many
     pairs, at 0.6 to 1.2 GB of RAM per Opus-MT or SMaLL-100 model (docs/benchmarks.md).
-    `unload()` drops them all.
+    `unload()` drops them all. `num_threads` caps the CPU threads onnxruntime uses in
+    each of them (`None` lets onnxruntime use every physical core), which is worth
+    setting when several workers share a machine.
 
     A profile downloads models into `cache_dir` (see `noentenc._cache` for the default),
     or with `only_local_files` only reads them from there, failing at once when a model
     is missing. `noentenc.prepare` downloads them ahead of time. For a `model` you pass,
-    give these options to the model instead.
+    give these options, and `num_threads`, to the model instead.
+
+    `translate_stream` translates an iterable of any length chunk by chunk, so memory
+    doesn't grow with the input; the batch and dataset methods hold all of it.
 
     `allowed_licenses` (SPDX identifiers, e.g. `["MIT", "Apache-2.0", "CC-BY-4.0"]`)
     and `max_download_bytes` restrict what a profile may pick. A model that breaks them
@@ -136,13 +148,21 @@ class Translator:
         detector: LanguageDetector | None = None,
         allowed_licenses: Iterable[str] | None = None,
         max_download_bytes: int | None = None,
+        num_threads: int | None = None,
     ) -> None:
         self.constraints = Constraints.of(allowed_licenses, max_download_bytes)
+        self.num_threads = check_int("num_threads", num_threads, optional=True)
         if isinstance(model, BaseModel):
-            if only_local_files or cache_dir is not None or self.constraints.active:
+            if (
+                only_local_files
+                or cache_dir is not None
+                or self.constraints.active
+                or num_threads is not None
+            ):
                 raise ValueError(
-                    "only_local_files, cache_dir and the licence and size constraints "
-                    "apply to the models a profile loads; pass a model that meets them"
+                    "only_local_files, cache_dir, num_threads and the licence and size "
+                    "constraints apply to the models a profile loads; pass a model "
+                    "built with them"
                 )
             self.model: BaseModel | None = model
             self.profile = Profile.SPEED  # only picks the default detector
@@ -402,6 +422,113 @@ class Translator:
         return translations if detailed else [t.text for t in translations]
 
     @overload
+    def translate_stream(
+        self,
+        texts: Iterable[str],
+        target_language: Language | str,
+        source_language: Language | str | None = None,
+        batch_size: int = 32,
+        *,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+        truncate: bool = False,
+        detailed: Literal[False] = False,
+        errors: ErrorPolicy = "raise",
+        unknown_source: UnknownSourcePolicy = "keep",
+        preserve: bool = True,
+    ) -> Iterator[str]: ...
+
+    @overload
+    def translate_stream(
+        self,
+        texts: Iterable[str],
+        target_language: Language | str,
+        source_language: Language | str | None = None,
+        batch_size: int = 32,
+        *,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+        truncate: bool = False,
+        detailed: Literal[True],
+        errors: ErrorPolicy = "raise",
+        unknown_source: UnknownSourcePolicy = "keep",
+        preserve: bool = True,
+    ) -> Iterator[Translation]: ...
+
+    def translate_stream(
+        self,
+        texts: Iterable[str],
+        target_language: Language | str,
+        source_language: Language | str | None = None,
+        batch_size: int = 32,
+        *,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+        truncate: bool = False,
+        detailed: bool = False,
+        errors: ErrorPolicy = "raise",
+        unknown_source: UnknownSourcePolicy = "keep",
+        preserve: bool = True,
+    ) -> Iterator[str] | Iterator[Translation]:
+        """Translate `texts` as they are read, yielding each result in input order.
+
+        `texts` can be any iterable of strings, such as a generator or an open file. It
+        is read `chunk_size` texts at a time and each chunk is translated like
+        `translate_batch`, so memory holds one chunk and its results, however long the
+        input. Arguments are checked here, before any text is read or model loaded; a
+        text that isn't a string raises when its chunk is read.
+
+        Each chunk is its own call. With `source_language="auto"` texts are grouped by
+        language within a chunk, so in a mixed-language stream a larger `chunk_size`
+        switches models less often, at the cost of memory and of time to the first
+        result. With `errors="raise"` a failing text ends the iteration when its chunk
+        is translated: earlier chunks' results have been yielded, and its own chunk's
+        are lost. `errors="record"` keeps going. `unknown_source="raise"` also fails at
+        the chunk holding the text.
+
+        Stopping early (`break`, or `close()` on the iterator) reads no more input; the
+        rest of the current chunk's results are dropped. Loaded models stay in the
+        translator for later calls.
+        """
+        _check_arguments(
+            target_language, source_language, batch_size, errors, unknown_source
+        )
+        translations = self._translate_chunks(
+            stream_chunks(texts, chunk_size),
+            target_language,
+            source_language,
+            batch_size,
+            truncate,
+            errors,
+            unknown_source,
+            preserve,
+        )
+        return translations if detailed else (t.text for t in translations)
+
+    def _translate_chunks(
+        self,
+        chunks: Iterator[list[str]],
+        target_language: Language | str,
+        source_language: Language | str | None,
+        batch_size: int,
+        truncate: bool,
+        errors: ErrorPolicy,
+        unknown_source: UnknownSourcePolicy,
+        preserve: bool,
+    ) -> Iterator[Translation]:
+        offset = 0
+        for chunk in chunks:
+            yield from self._translate(
+                chunk,
+                target_language,
+                source_language,
+                batch_size,
+                truncate,
+                errors,
+                unknown_source,
+                preserve=preserve,
+                offset=offset,
+            )
+            offset += len(chunk)
+
+    @overload
     def translate_dataset(
         self,
         dataset: pl.DataFrame,
@@ -470,6 +597,9 @@ class Translator:
         `status_column` adds each row's `TranslationStatus` and `source_column` the
         source language used (detected, with `"auto"`); both are null for null texts.
         With `show_progress` a tqdm bar tracks the rows translated so far.
+
+        The whole column and its translations are held in memory; for more rows than
+        fit, use `translate_stream`.
         """
         _check_arguments(
             target_language, source_language, batch_size, errors, unknown_source
@@ -524,8 +654,12 @@ class Translator:
         progress: Callable[[int], object] | None = None,
         *,
         preserve: bool = True,
+        offset: int = 0,
     ) -> list[Translation]:
-        """Translate `texts`, answering what needs no model before loading one."""
+        """Translate `texts`, answering what needs no model before loading one.
+
+        `offset` is the index of `texts[0]` in the caller's input, for error messages.
+        """
         check_texts(texts)
         target, source, auto = _check_arguments(
             target_language, source_language, batch_size, errors, unknown_source
@@ -538,7 +672,7 @@ class Translator:
         pending = [i for i, text in enumerate(texts) if not is_blank(text)]
         if auto:
             groups = self._auto_groups(
-                texts, pending, target, batch_size, unknown_source, results
+                texts, pending, target, batch_size, unknown_source, results, offset
             )
         elif pending and source != target:
             key, load = self._route(source, target)
@@ -606,6 +740,7 @@ class Translator:
         batch_size: int,
         unknown_source: UnknownSourcePolicy,
         results: list[Translation],
+        offset: int,
     ) -> list[_Group]:
         """Detect the language of each pending text and group them by source.
 
@@ -645,7 +780,9 @@ class Translator:
                 unusable += [(i, TranslationStatus.UNSUPPORTED_SOURCE) for i in indices]
                 continue
             groups.append(_Group(language, indices, key, load))
-        return groups + self._unusable(texts, target, unusable, unknown_source, results)
+        return groups + self._unusable(
+            texts, target, unusable, unknown_source, results, offset
+        )
 
     def _unusable(
         self,
@@ -654,6 +791,7 @@ class Translator:
         unusable: list[tuple[int, TranslationStatus]],
         policy: UnknownSourcePolicy,
         results: list[Translation],
+        offset: int,
     ) -> list[_Group]:
         """Apply `unknown_source` to texts that can't be translated from their language."""
         if not unusable:
@@ -661,7 +799,7 @@ class Translator:
         if policy == "raise":
             i, status = min(unusable)
             raise SourceLanguageError(
-                f"texts[{i}] ({status}, detected {results[i].detected_language!r}): "
+                f"texts[{offset + i}] ({status}, detected {results[i].detected_language!r}): "
                 f"{texts[i][:60]!r}; pass unknown_source='keep' or 'fallback' to "
                 "translate the other texts"
             )
@@ -690,7 +828,9 @@ class Translator:
         return choice, lambda: self._cached(
             choice,
             lambda: choice.build(
-                only_local_files=self.only_local_files, cache_dir=self.cache_dir
+                only_local_files=self.only_local_files,
+                cache_dir=self.cache_dir,
+                num_threads=self.num_threads,
             ),
         )
 

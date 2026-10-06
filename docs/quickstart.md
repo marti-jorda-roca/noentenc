@@ -133,6 +133,16 @@ translator.loaded_models  # the models it holds right now
 translator.unload()  # free them; the next call loads what it needs again
 ```
 
+### Threads
+
+By default onnxruntime gives each translation model every physical core. That's the fastest setup for one process, but when several workers share a machine they compete for the same cores. Give each one its share:
+
+```python
+translator = Translator(num_threads=2)
+```
+
+The cap applies to every model the translator loads. A model you build yourself takes `num_threads=` too, and so do the ONNX detection models (`OnnxClassifierModel("bert-openlid", num_threads=2)`). The fastText models the detection profiles use don't run on onnxruntime and have no thread setting. [parallel_workers.py](examples/parallel_workers.py) splits a job across processes this way.
+
 ### Keep links and placeholders
 
 Machine translation models translate everything they see, including the parts that must not change. Opus-MT turns `https://example.com/reset` into `https://ejemplo.com/reset`, which is a different site. So before a text reaches the model, `Translator` swaps these literals for placeholders the models copy through, and puts them back afterwards:
@@ -340,7 +350,7 @@ Translator(
 )
 ```
 
-Every translation model also takes `num_threads=`, which is worth capping when several workers share a machine.
+Every translation model also takes `num_threads=`, like `Translator` does for the models a profile loads (see [Threads](#threads)).
 
 If a model can't handle a pair, the call raises `UnsupportedLanguageError`.
 
@@ -367,6 +377,45 @@ df = translator.translate_dataset(df, "text", "text_en", Language.ENGLISH)
 ```
 
 Null cells get `und` from the detector and stay null in the translation. Both show a progress bar, which `show_progress=False` turns off.
+
+Both hold the whole column, its results and the new frame in memory. That's fine for a frame that already fits; for more rows than that, [stream them](#stream-large-inputs).
+
+## Stream large inputs
+
+`detect_batch`, `translate_batch` and the DataFrame methods hold every text and every result at once. For a large file, a database cursor or a generator, use `detect_stream` and `translate_stream`. They take any iterable of strings, read it `chunk_size` texts at a time (1,024 by default) and yield one result per text, in input order. Memory holds one chunk and its results, however long the input is.
+
+```python
+from noentenc import Language
+from noentenc.language_detection import LanguageDetector
+from noentenc.translation import Translator
+
+with open("reviews.txt", encoding="utf-8") as reviews:
+    lines = (line.rstrip("\n") for line in reviews)
+    for language in LanguageDetector().detect_stream(lines):
+        ...
+
+with (
+    open("reviews.txt", encoding="utf-8") as reviews,
+    open("reviews_en.txt", "w", encoding="utf-8") as out,
+):
+    lines = (line.rstrip("\n") for line in reviews)
+    for english in Translator().translate_stream(
+        lines, Language.ENGLISH, "auto", errors="record"
+    ):
+        out.write(english + "\n")
+```
+
+They take the same arguments as the batch methods, plus `chunk_size`. Each chunk is translated like one `translate_batch` call, which has some consequences:
+
+- With `source_language="auto"`, texts are grouped by language within each chunk, not across the whole stream. If the stream mixes more languages than `max_loaded_models`, a chunk can reload a model an earlier chunk dropped. A larger `chunk_size` or a higher `max_loaded_models` means fewer reloads.
+- Texts are sorted by length within a chunk to keep padding low. Very small chunks pad more and translate more slowly; see the [streaming benchmark](benchmarks.md#streaming).
+- With `errors="raise"` (the default), a text that fails ends the iteration when its chunk is translated. Results from earlier chunks have already been yielded, and the failing chunk's are lost. For long jobs, use `errors="record"`. `unknown_source="raise"` also fails at the chunk that holds the text, and the error gives its index in the whole stream.
+
+Arguments are checked when you call the method, before any text is read or any model loaded. A text that isn't a string, such as `None` from a nullable column, raises `TypeError` when its chunk is read, so map nulls first (`text or ""`).
+
+Stopping early, with `break`, `itertools.islice` or `close()`, reads no more input. The current chunk has already been processed, and the rest of its results are dropped. Loaded models stay in the translator for its next call.
+
+Results arrive a chunk at a time. Wrap the iterator in `tqdm(..., total=n)` for a progress bar. To keep each result next to its input record, zip the stream with the records: `itertools.tee` the source, as [stream_translation.py](examples/stream_translation.py) does, and it buffers at most the chunk read ahead. [stream_detection.py](examples/stream_detection.py) labels a file line by line.
 
 ## Run offline
 

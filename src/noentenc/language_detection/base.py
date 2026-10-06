@@ -4,7 +4,13 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 from tqdm import tqdm
 
-from noentenc._batching import check_batch_size, check_int, check_texts
+from noentenc._batching import (
+    DEFAULT_CHUNK_SIZE,
+    check_batch_size,
+    check_int,
+    check_texts,
+    stream_chunks,
+)
 from noentenc._catalog import DETECTION_FILE_SIZES
 from noentenc._dataframe import column_values, with_column
 from noentenc._plan import (
@@ -22,7 +28,7 @@ from noentenc.language_detection.models.fasttext.model import PRESETS
 from noentenc.profiles import Profile
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
     from pathlib import Path
 
     import pandas as pd
@@ -260,6 +266,68 @@ class LanguageDetector:
         return self._detect(texts, batch_size, with_score, top_k, detailed)
 
     @overload
+    def detect_stream(
+        self,
+        texts: Iterable[str],
+        batch_size: int = 32,
+        with_score: Literal[False] = False,
+        top_k: int | None = DEFAULT_TOP_K,
+        *,
+        detailed: Literal[False] = False,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+    ) -> Iterator[str]: ...
+
+    @overload
+    def detect_stream(
+        self,
+        texts: Iterable[str],
+        batch_size: int = 32,
+        *,
+        with_score: Literal[True],
+        top_k: int | None = DEFAULT_TOP_K,
+        detailed: Literal[False] = False,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+    ) -> Iterator[dict[str, float]]: ...
+
+    @overload
+    def detect_stream(
+        self,
+        texts: Iterable[str],
+        batch_size: int = 32,
+        with_score: Literal[False] = False,
+        top_k: int | None = DEFAULT_TOP_K,
+        *,
+        detailed: Literal[True],
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+    ) -> Iterator[Detection]: ...
+
+    def detect_stream(
+        self,
+        texts: Iterable[str],
+        batch_size: int = 32,
+        with_score: bool = False,
+        top_k: int | None = DEFAULT_TOP_K,
+        *,
+        detailed: bool = False,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+    ) -> Iterator[str] | Iterator[dict[str, float]] | Iterator[Detection]:
+        """The language of each of ``texts``, like ``detect``, yielded as they are read.
+
+        ``texts`` can be any iterable of strings, such as a generator or an open file. It is
+        read ``chunk_size`` texts at a time, so memory holds one chunk and its results,
+        however long the input. Arguments are checked here, before any text is read; a text
+        that isn't a string raises when its chunk is read. Stopping early reads no more
+        input.
+        """
+        _check_arguments(batch_size, with_score, top_k, detailed)
+        chunks = stream_chunks(texts, chunk_size)
+        return (
+            result
+            for chunk in chunks
+            for result in self._detect(chunk, batch_size, with_score, top_k, detailed)
+        )
+
+    @overload
     def detect_dataset(
         self,
         dataset: pl.DataFrame,
@@ -305,6 +373,9 @@ class LanguageDetector:
         sorted by score, which gives polars a fixed schema. Null texts get ``"und"``.
         ``status_column`` adds each row's ``DetectionStatus`` (``"empty"`` for null texts).
         With ``show_progress`` a tqdm bar tracks the rows inferred so far.
+
+        The whole column and its labels are held in memory; for more rows than fit, use
+        ``detect_stream``.
         """
         check_batch_size(batch_size)
         check_int("top_k", top_k, optional=True)
@@ -347,10 +418,7 @@ class LanguageDetector:
         top_k: int | None,
         detailed: bool,
     ) -> Any:  # noqa: ANN401 - the public overloads type each combination
-        check_batch_size(batch_size)
-        check_int("top_k", top_k, optional=True)
-        if with_score and detailed:
-            raise ValueError("pass with_score or detailed, not both")
+        _check_arguments(batch_size, with_score, top_k, detailed)
         if detailed:
             return self._detect_detailed(texts, batch_size)
         if with_score:
@@ -383,3 +451,12 @@ class LanguageDetector:
         for i, text_scores in zip(pending, scores, strict=True):
             results[i] = self.policy.decide(text_scores)
         return results  # ty: ignore[invalid-return-type] - every slot is filled above
+
+
+def _check_arguments(
+    batch_size: int, with_score: bool, top_k: int | None, detailed: bool
+) -> None:
+    check_batch_size(batch_size)
+    check_int("top_k", top_k, optional=True)
+    if with_score and detailed:
+        raise ValueError("pass with_score or detailed, not both")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import weakref
 from concurrent.futures import ThreadPoolExecutor
+from itertools import islice
 from pathlib import Path
 
 import pandas as pd
@@ -28,6 +29,7 @@ from noentenc.translation.models.base import (
 from noentenc.translation.models.nllb import NLLBModel
 from noentenc.translation.models.opus_mt import OpusMTModel
 from noentenc.translation.models.small100 import SMaLL100Model
+from tests.unit.helpers import CountingTexts
 
 EN, ES = Language.ENGLISH, Language.SPANISH
 
@@ -151,6 +153,7 @@ class FakeSeq2Seq(UpperModel):
         *,
         revision: str | None = None,
         precision: str | None = None,
+        num_threads: int | None = None,
         cache_dir: object = None,
     ) -> None:
         FakeSeq2Seq.loads.append(
@@ -159,6 +162,7 @@ class FakeSeq2Seq(UpperModel):
                 "model": model,
                 "only_local_files": only_local_files,
                 "cache_dir": cache_dir,
+                "num_threads": num_threads,
             }
         )
         super().__init__()
@@ -557,3 +561,121 @@ def test_concurrent_calls_share_the_bounded_cache() -> None:
         results = list(pool.map(translate, targets))
     assert results == [f"HI:{target}" for target in targets]
     assert len(translator.loaded_models) <= 1
+
+
+def test_stream_reads_one_chunk_at_a_time(translator: Translator) -> None:
+    texts = CountingTexts(list("abcdefg"))
+    stream = translator.translate_stream(texts, EN, chunk_size=3)
+    assert texts.read == 0
+    results: list[str] = []
+    for result in stream:
+        results.append(result)
+        # Never more than one chunk read ahead of what was returned.
+        assert texts.read - len(results) < 3
+    assert results == [f"{c.upper()}:en" for c in "abcdefg"]
+    model = translator.model
+    assert isinstance(model, UpperModel)
+    assert model.batches == [["a", "b", "c"], ["d", "e", "f"], ["g"]]
+
+
+def test_stream_matches_batch(translator: Translator) -> None:
+    texts = ["a", "", "b", " ", "c"]
+    streamed = translator.translate_stream(texts, ES, EN, detailed=True, chunk_size=2)
+    assert list(streamed) == translator.translate_batch(texts, ES, EN, detailed=True)
+    assert list(translator.translate_stream(iter(texts), ES)) == (
+        translator.translate_batch(texts, ES)
+    )
+    assert list(translator.translate_stream([], ES)) == []
+
+
+def test_stopping_a_stream_stops_reading(translator: Translator) -> None:
+    texts = CountingTexts(list("abcdef"))
+    stream = translator.translate_stream(texts, EN, chunk_size=2)
+    assert list(islice(stream, 3)) == ["A:en", "B:en", "C:en"]
+    assert texts.read == 4
+
+
+@pytest.mark.usefixtures("fake_models")
+@pytest.mark.parametrize(
+    ("option", "value", "message"),
+    [
+        ("batch_size", 0, "batch_size"),
+        ("chunk_size", 0, "chunk_size"),
+        ("chunk_size", 2.5, "chunk_size"),
+        ("errors", "ignore", "errors must be"),
+        ("unknown_source", "skip", "unknown_source must be"),
+    ],
+)
+def test_stream_checks_arguments_before_reading(
+    option: str, value: object, message: str
+) -> None:
+    texts = CountingTexts(["hello"])
+    with pytest.raises((TypeError, ValueError), match=message):
+        Translator().translate_stream(texts, ES, EN, **{option: value})  # ty: ignore[no-matching-overload]
+    assert texts.read == 0
+    assert FakeOpus.created == []
+
+
+def test_stream_rejects_what_is_not_an_iterable_of_strings(
+    translator: Translator,
+) -> None:
+    with pytest.raises(TypeError, match="iterable of strings, got str"):
+        translator.translate_stream("hello", EN)
+    with pytest.raises(TypeError, match="iterable of strings, got int"):
+        translator.translate_stream(5, EN)  # ty: ignore[invalid-argument-type]
+    with pytest.raises(UnsupportedLanguageError, match="'xx' is not a language"):
+        translator.translate_stream([], "xx")
+    stream = translator.translate_stream(["a", "b", "c", None], EN, chunk_size=2)  # ty: ignore[invalid-argument-type]
+    assert list(islice(stream, 2)) == ["A:en", "B:en"]
+    with pytest.raises(TypeError, match=r"texts\[3\] must be a string, got NoneType"):
+        next(stream)
+
+
+def test_stream_error_policies() -> None:
+    translator = Translator(FailingModel())
+    stream = translator.translate_stream(["a", "b", "c", "bad", "d"], EN, chunk_size=2)
+    # The chunk before the failing one has been returned; the failing chunk is lost.
+    assert list(islice(stream, 2)) == ["A:en", "B:en"]
+    with pytest.raises(InputTooLongError):
+        next(stream)
+    recorded = translator.translate_stream(
+        ["a", "bad", "b"], EN, chunk_size=2, detailed=True, errors="record"
+    )
+    assert [r.status for r in recorded] == [
+        TranslationStatus.TRANSLATED,
+        TranslationStatus.FAILED,
+        TranslationStatus.TRANSLATED,
+    ]
+
+
+@pytest.mark.usefixtures("fake_models")
+def test_num_threads_reaches_every_model_a_profile_loads() -> None:
+    translator = Translator(num_threads=2)
+    translator.translate("hi", ES, EN)
+    translator.translate("hi", ES)
+    assert [(load["class"], load["num_threads"]) for load in FakeSeq2Seq.loads] == [
+        ("FakeOpus", 2),
+        ("FakeSmall100", 2),
+    ]
+    Translator().translate("hi", ES, EN)
+    assert FakeSeq2Seq.loads[-1]["num_threads"] is None
+
+
+@pytest.mark.parametrize(
+    ("value", "error"),
+    [
+        (0, ValueError),
+        (-1, ValueError),
+        (2.5, TypeError),
+        ("2", TypeError),
+        (True, TypeError),
+    ],
+)
+def test_invalid_num_threads(value: object, error: type[Exception]) -> None:
+    with pytest.raises(error, match="num_threads"):
+        Translator(num_threads=value)  # ty: ignore[invalid-argument-type]
+
+
+def test_num_threads_is_for_profiles_only() -> None:
+    with pytest.raises(ValueError, match="num_threads .* a profile loads"):
+        Translator(UpperModel(), num_threads=2)

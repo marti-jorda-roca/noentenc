@@ -27,9 +27,12 @@ def detection() -> None:
     detector = LanguageDetector()
     label = detector.detect("Bon dia! Com estàs?")
     labels = detector.detect_batch(["Hello there", "Hola, ¿qué tal?", ""])
-    print(label, labels)
-    if label != "cat" or labels != ["eng", "spa", "und"]:
-        raise SystemExit(f"unexpected detection: {label!r} {labels!r}")
+    streamed = list(
+        detector.detect_stream(iter(["Hello there", "Hola, ¿qué tal?", ""]))
+    )
+    print(label, labels, streamed)
+    if label != "cat" or labels != ["eng", "spa", "und"] or streamed != labels:
+        raise SystemExit(f"unexpected detection: {label!r} {labels!r} {streamed!r}")
     imported = [m for m in TRANSLATION_DEPENDENCIES if m in sys.modules]
     if imported:
         raise SystemExit(f"detection imported {imported}")
