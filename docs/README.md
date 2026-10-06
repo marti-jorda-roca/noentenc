@@ -34,7 +34,7 @@ noentenc detects languages and translates text in Python, on CPU, without torch.
 
 | Page | Read it to |
 |---|---|
-| [quickstart.md](quickstart.md) | Learn the API: detect, translate, abstain when unsure, handle long text, keep links and placeholders, pick a profile or a model, work with DataFrames and run offline. |
+| [quickstart.md](quickstart.md) | Learn the API: detect, translate, abstain when unsure, handle long text, keep links and placeholders, pick a profile or a model, work with DataFrames, stream large inputs and run offline. |
 | [benchmarks.md](benchmarks.md) | Compare models on speed, memory and accuracy, choose detection thresholds, and see why each profile uses the models it does. |
 | [custom-models.md](custom-models.md) | Load your own weights, wrap another detector or translator, add an ONNX encoder-decoder, or contribute a model to noentenc. |
 
@@ -55,6 +55,8 @@ The project README has the [model tables](../README.md#models) with each model's
 | Pick a specific detection or translation model | [Choose a detection model](quickstart.md#choose-a-detection-model), [Choose a translation model](quickstart.md#choose-a-translation-model) |
 | Bound memory in a long-running service | [Memory](quickstart.md#memory), [Memory benchmark](benchmarks.md#memory) |
 | Tag or translate a pandas or polars column | [Work with DataFrames](quickstart.md#work-with-dataframes) |
+| Process a file or stream too large to hold in memory | [Stream large inputs](quickstart.md#stream-large-inputs), [Streaming benchmark](benchmarks.md#streaming) |
+| Share a machine's cores between several workers | [Threads](quickstart.md#threads) |
 | Run without network access | [Run offline](quickstart.md#run-offline) |
 | Use my own model | [Custom models](custom-models.md) |
 
@@ -75,6 +77,7 @@ The docstring at the top of each script says which extras it needs and what it d
 | [detect_dataset.py](examples/detect_dataset.py) | Tag a DataFrame column and keep only confident English rows. |
 | [conservative_detection.py](examples/conservative_detection.py) | Abstain on names, chat tokens and links instead of guessing, and restrict the candidate languages. |
 | [choose_detection_backend.py](examples/choose_detection_backend.py) | Swap backends, restrict candidate languages, collapse macrolanguages. |
+| [stream_detection.py](examples/stream_detection.py) | Label every line of a large file with flat memory, and stop reading once you have what you need. |
 
 **Translation**
 
@@ -86,6 +89,8 @@ The docstring at the top of each script says which extras it needs and what it d
 | [translate_bulk.py](examples/translate_bulk.py) | Run bulk jobs with `errors="record"` so one bad row doesn't stop them. |
 | [choose_translation_model.py](examples/choose_translation_model.py) | Pick a model, precision and thread count. |
 | [manage_memory.py](examples/manage_memory.py) | Bound how many translation models stay loaded, and free them with `unload()`. |
+| [stream_translation.py](examples/stream_translation.py) | Translate a JSON Lines file of any size with `translate_stream`, writing each result as it comes. |
+| [parallel_workers.py](examples/parallel_workers.py) | Split a job across processes and give each translator its share of the cores with `num_threads`. |
 
 **Models, profiles and deployment**
 

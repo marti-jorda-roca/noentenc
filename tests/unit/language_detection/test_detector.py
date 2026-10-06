@@ -1,3 +1,5 @@
+from itertools import islice
+
 import pandas as pd
 import polars as pl
 import pytest
@@ -7,6 +9,7 @@ from noentenc.language_detection import base as detector_module
 from noentenc.language_detection.models.base import BaseModel
 from noentenc.language_detection.models.fasttext import FastTextModel
 from noentenc.profiles import Profile
+from tests.unit.helpers import CountingTexts
 from tests.unit.language_detection.helpers import FASTTEXT_FIXTURES
 
 TINY = FASTTEXT_FIXTURES / "tiny-softmax.bin"
@@ -134,3 +137,58 @@ def test_detect_dataset_pandas(detector: LanguageDetector) -> None:
 def test_detect_dataset_rejects_other_types(detector: LanguageDetector) -> None:
     with pytest.raises(TypeError, match="polars or pandas"):
         detector.detect_dataset({"text": ["a"]}, "text", "lang")  # ty: ignore[no-matching-overload]
+
+
+def test_detect_stream_matches_detect_batch(
+    detector: LanguageDetector, sentences: list[str]
+) -> None:
+    assert list(detector.detect_stream(iter(sentences), chunk_size=7)) == (
+        detector.detect_batch(sentences)
+    )
+    # Scores move in the last float digits with batch composition; labels don't.
+    streamed = list(detector.detect_stream(sentences, chunk_size=7, detailed=True))
+    batch = detector.detect_batch(sentences, detailed=True)
+    assert [(d.language, d.status) for d in streamed] == [
+        (d.language, d.status) for d in batch
+    ]
+    assert [d.score for d in streamed] == pytest.approx([d.score for d in batch])
+    scores = detector.detect_stream(sentences, with_score=True, top_k=2, chunk_size=7)
+    batch_scores = detector.detect_batch(sentences, with_score=True, top_k=2)
+    for streamed_scores, expected in zip(scores, batch_scores, strict=True):
+        assert streamed_scores == pytest.approx(expected)
+
+
+def test_detect_stream_reads_one_chunk_at_a_time(detector: LanguageDetector) -> None:
+    texts = CountingTexts(["el perro corrió"] * 5)
+    stream = detector.detect_stream(texts, chunk_size=2)
+    assert texts.read == 0
+    labels: list[str] = []
+    for label in stream:
+        labels.append(label)
+        # Never more than one chunk read ahead of what was returned.
+        assert texts.read - len(labels) < 2
+    assert labels == ["spa"] * 5
+    texts = CountingTexts(["el perro corrió"] * 5)
+    assert list(islice(detector.detect_stream(texts, chunk_size=2), 3)) == ["spa"] * 3
+    assert texts.read == 4
+
+
+def test_detect_stream_checks_arguments_before_reading(
+    detector: LanguageDetector,
+) -> None:
+    texts = CountingTexts(["hello"])
+    with pytest.raises(ValueError, match="batch_size"):
+        detector.detect_stream(texts, batch_size=0)
+    with pytest.raises(ValueError, match="chunk_size"):
+        detector.detect_stream(texts, chunk_size=0)
+    with pytest.raises(ValueError, match="top_k"):
+        detector.detect_stream(texts, top_k=0)
+    with pytest.raises(ValueError, match="not both"):
+        detector.detect_stream(texts, with_score=True, detailed=True)  # ty: ignore[no-matching-overload]
+    with pytest.raises(TypeError, match="iterable of strings, got str"):
+        detector.detect_stream("hello")
+    assert texts.read == 0
+    stream = detector.detect_stream(["el perro corrió", 1], chunk_size=1)  # ty: ignore[invalid-argument-type]
+    assert next(stream) == "spa"
+    with pytest.raises(TypeError, match=r"texts\[1\] must be a string, got int"):
+        next(stream)

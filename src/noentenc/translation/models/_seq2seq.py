@@ -29,6 +29,9 @@ if TYPE_CHECKING:
 
 _PREVIEW_LENGTH = 60
 
+# Sentences tokenized at once. Bounds the tokenizer's memory on large calls.
+_TOKENIZE_WINDOW = 2048
+
 
 class Precision(StrEnum):
     FP32 = "fp32"
@@ -222,16 +225,25 @@ class Seq2SeqModel(BaseModel):
             return [], [], []
         # Leave room for the language tokens and </s> added by `_frame`.
         limit = self.max_length - len(self._frame([], source, target))
-        encodings = self.tokenizer.encode_batch(sentences, add_special_tokens=False)
-        truncated = [len(encoding.ids) > limit for encoding in encodings]
-        if any(truncated) and not truncate:
-            i = truncated.index(True)
-            raise InputTooLongError(
-                f"{type(self).__name__} reads at most {limit} tokens per sentence, and "
-                f"this one has {len(encodings[i].ids)}: {_preview(sentences[i])!r}. "
-                "Split it, or pass truncate=True to translate only its start."
+        sequences: list[list[int]] = []
+        truncated: list[bool] = []
+        # A window at a time, keeping only the ids, so the tokenizer's `Encoding`s
+        # (offsets, masks, token strings) never exist for the whole call at once.
+        for start in range(0, len(sentences), _TOKENIZE_WINDOW):
+            encodings = self.tokenizer.encode_batch(
+                sentences[start : start + _TOKENIZE_WINDOW], add_special_tokens=False
             )
-        sequences = [self._frame(e.ids[:limit], source, target) for e in encodings]
+            for i, encoding in enumerate(encodings, start):
+                ids = encoding.ids
+                if len(ids) > limit and not truncate:
+                    raise InputTooLongError(
+                        f"{type(self).__name__} reads at most {limit} tokens per "
+                        f"sentence, and this one has {len(ids)}: "
+                        f"{_preview(sentences[i])!r}. Split it, or pass truncate=True "
+                        "to translate only its start."
+                    )
+                truncated.append(len(ids) > limit)
+                sequences.append(self._frame(ids[:limit], source, target))
         generation = replace(
             self._generation, forced_first_id=self._forced_first_id(target)
         )

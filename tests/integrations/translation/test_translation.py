@@ -106,3 +106,16 @@ def test_long_text_keeps_every_sentence_and_line_break() -> None:
     assert "Barcelona" in last
     assert not result.input_truncated
     assert not result.output_limit_reached
+
+
+def test_stream_with_capped_threads_matches_batch() -> None:
+    load(lambda local: OpusMTModel.from_pair(EN, ES, only_local_files=local))
+    translator = Translator(num_threads=1)
+    streamed = translator.translate_stream(
+        iter(SENTENCES), ES, EN, batch_size=5, chunk_size=6
+    )
+    assert list(streamed) == translator.translate_batch(SENTENCES, ES, EN, batch_size=5)
+    (model,) = translator.loaded_models
+    assert isinstance(model, OpusMTModel)
+    for session in (model._engine._encoder, model._engine._decoder):
+        assert session.get_session_options().intra_op_num_threads == 1
