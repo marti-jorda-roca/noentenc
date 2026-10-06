@@ -498,6 +498,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "cld3-py" },
+    { name = "click" },
     { name = "heliport", marker = "sys_platform != 'win32'" },
     { name = "huggingface-hub" },
     { name = "lingua-language-detector", version = "2.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -509,6 +510,9 @@ all = [
 ]
 cld3 = [
     { name = "cld3-py" },
+]
+cli = [
+    { name = "click" },
 ]
 heliport = [
     { name = "heliport", marker = "sys_platform != 'win32'" },
@@ -550,10 +554,11 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cld3-py", marker = "extra == 'cld3'", specifier = ">=3.1" },
+    { name = "click", marker = "extra == 'cli'", specifier = ">=8.5.0" },
     { name = "heliport", marker = "sys_platform != 'win32' and extra == 'heliport'", specifier = ">=1.0.1" },
     { name = "huggingface-hub", marker = "extra == 'translation'", specifier = ">=1.33.0" },
     { name = "lingua-language-detector", marker = "extra == 'lingua'", specifier = ">=2.1.1" },
-    { name = "noentenc", extras = ["translation", "onnx", "pandas", "polars", "lingua", "cld3", "heliport"], marker = "extra == 'all'" },
+    { name = "noentenc", extras = ["translation", "onnx", "pandas", "polars", "lingua", "cld3", "heliport", "cli"], marker = "extra == 'all'" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "onnxruntime", marker = "extra == 'onnx'", specifier = ">=1.30.0" },
     { name = "onnxruntime", marker = "extra == 'translation'", specifier = ">=1.30.0" },
@@ -563,7 +568,7 @@ requires-dist = [
     { name = "tokenizers", marker = "extra == 'translation'", specifier = ">=0.23.2" },
     { name = "tqdm", specifier = ">=4.70.1" },
 ]
-provides-extras = ["translation", "onnx", "pandas", "polars", "lingua", "cld3", "heliport", "all"]
+provides-extras = ["translation", "onnx", "pandas", "polars", "lingua", "cld3", "heliport", "cli", "all"]
 
 [package.metadata.requires-dev]
 dev = [

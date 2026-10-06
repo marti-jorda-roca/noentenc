@@ -50,6 +50,7 @@ Requires Python 3.11 or newer, on Linux, macOS or Windows. Install with pip or u
 | Detection: fastText and langid, with numpy | `pip install noentenc` | `uv add noentenc` |
 | Detection and every translation model | `pip install 'noentenc[translation]'` | `uv add 'noentenc[translation]'` |
 | The ONNX detection models (bert-openlid, xlm-roberta-lid) | `pip install 'noentenc[onnx]'` | `uv add 'noentenc[onnx]'` |
+| The `noentenc` command, see [Command line](#command-line) | `pip install 'noentenc[cli,translation]'` | `uv add 'noentenc[cli,translation]'` |
 | Extra detection backends, see [the table below](#language-detection) | `pip install 'noentenc[lingua,cld3]'` | `uv add 'noentenc[lingua,cld3]'` |
 | Everything | `pip install 'noentenc[all]'` | `uv add 'noentenc[all]'` |
 
@@ -194,6 +195,22 @@ translator.supports("ace", "en")  # False: only NLLB-200 writes Acehnese
 ```
 
 Each plan reports the model's licence, download size, RAM (measured, or estimated where marked) and cache state. A pair with no allowed model raises `ModelConstraintError` before anything downloads. `prepare()` takes the same constraints.
+
+## Command line
+
+With the `cli` extra, the `noentenc` command detects and translates text from the shell, one result per input line, and downloads models ahead of time:
+
+```bash
+noentenc detect "Bon dia! Com estàs?"
+# cat
+cat inbox.txt | noentenc translate --to en
+noentenc translate --to en --json --file reviews.txt > reviews.en.jsonl
+noentenc download --pair es:en --pair :en --cache-dir /models
+noentenc list    # every model, its size, licence, profiles and whether it's cached
+noentenc info    # where the cache is and what it holds
+```
+
+Results go to stdout and progress and errors to stderr, and the exit code says whether a model was missing offline or a text failed. See [docs/cli.md](docs/cli.md).
 
 ## Examples
 

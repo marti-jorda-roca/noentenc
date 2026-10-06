@@ -144,6 +144,25 @@ jobs:
           uv run --no-project --isolated --with "noentenc[translation] @ $wheel" python scripts/smoke_quickstart.py translation
         env:
           NOENTENC_CACHE: ${{ runner.temp }}/noentenc
+      # docs/cli.md, offline on the weights the steps above downloaded.
+      - name: Command line, cli extra
+        run: |
+          wheel=$(ls dist/*.whl)
+          # Without the extra, the command exits with 1 and names it.
+          if uv run --no-project --isolated --with "$wheel" noentenc 2> missing.txt; then exit 1; fi
+          grep -q "noentenc\[cli\]" missing.txt
+          noentenc() { uv run --no-project --isolated --with "noentenc[cli,translation] @ $wheel" noentenc "$@"; }
+          label=$(noentenc detect --offline "Bon dia! Com estàs?" | tr -d '\r')
+          test "$label" = "cat"
+          printf 'Hola, ¿cuándo llega mi pedido?\nThanks, it works now.\n' \
+            | noentenc translate --to en --offline | tr -d '\r' | tee translations.txt
+          grep -q "order" translations.txt
+          grep -qx "Thanks, it works now." translations.txt
+          noentenc download --pair es:en --dry-run
+          noentenc list --task detection
+          noentenc info
+        env:
+          NOENTENC_CACHE: ${{ runner.temp }}/noentenc
 
   integration-tests:
     name: Integration tests / ${{ matrix.suite }}
