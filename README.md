@@ -14,44 +14,48 @@
 </div>
 
 ```python
-from noentenc import Language
 from noentenc.language_detection import LanguageDetector
 from noentenc.translation import Translator
 
 LanguageDetector().detect("Bon dia! Com estàs?")
 # 'cat'
 
-Translator().translate("The weather is nice today.", Language.SPANISH, Language.ENGLISH)
-# 'El tiempo es bueno hoy.'
+# Detect each text's language and translate it into English.
+Translator().translate_batch(
+    [
+        "Hola, ¿cuándo llega mi pedido?",
+        "Der Link funktioniert nicht.",
+        "Thanks, it works now.",
+    ],
+    "en",
+    "auto",
+)
+# ['Hey, when does my order arrive?', "The link doesn't work.", 'Thanks, it works now.']
 ```
 
-- **Fast.** Detects a language in as little as 2.5 µs and translates a sentence in about 52 ms, on a laptop CPU. See [benchmarks](docs/benchmarks.md).
-- **Faster than the originals.** Up to 470× faster than `langid.py`, 2× faster than the C++ `fasttext` package and 5.8× faster than transformers + PyTorch, with the same accuracy. See [the comparison](docs/benchmarks.md#against-the-original-implementations).
-- **Small.** The default detection model is 0.9 MB, and detection needs only numpy and tqdm. Translation adds onnxruntime, tokenizers and huggingface-hub. There is no torch, transformers or GPU dependency.
-- **One API, many models.** 12 detection models and 4 translation model families sit behind the same two classes. Swapping one is a one-line change, and every detector returns the same ISO 639-3 labels.
+- **Fast on the defaults.** `LanguageDetector()` labels a sentence it hasn't seen in about 0.12 ms, and about 22k paragraphs a second in batches. Once a sentence's words are cached it takes about 15 µs. `Translator()` translates a sentence in about 60 ms with a dedicated Opus-MT model. These numbers are from an Apple M3; see [benchmarks](docs/benchmarks.md).
+- **Small, and cheap to start.** Detection installs 23 MB of packages, needs only numpy and tqdm, and its first call downloads a 0.9 MB model in about a second. With translation, the install is 127 MB, and the example above downloads 554 MB of weights on its first run (about 20 s here). After that a new process gives its first result in 1.2 s. There is no torch, transformers or GPU dependency. See [First use](docs/benchmarks.md#first-use).
+- **Faster than the originals.** `langid` runs up to 470× faster than `langid.py`. Against the C++ `fasttext` package, `lid176` labels batches of short sentences 2× faster but is 4× slower one text at a time. The ONNX models answer a single text up to 5.8× faster than transformers + PyTorch. Accuracy is the same. See [the comparison](docs/benchmarks.md#against-the-original-implementations).
+- **One API, many models.** 12 detection models and 4 translation model families sit behind the same two classes. Swapping one is a one-line change, and every detector returns the same ISO 639-3 labels. The optional `heliport` backend labels a short sentence in 2.5 µs, but it's GPL-3.0 and has no Windows wheel.
 - **Built for datasets.** You can pass a single string, a list or a pandas or polars column, or stream a file of any length with flat memory.
 
-New to noentenc? The [quickstart](docs/quickstart.md) covers detection, translation and choosing a model on one page.
+New to noentenc? The [quickstart](docs/quickstart.md) covers install, detection and translation on the defaults first, then choosing models, memory and offline use.
 
 ## Install
 
-noentenc uses [uv](https://docs.astral.sh/uv/) to manage dependencies.
-
 Requires Python 3.11 or newer, on Linux, macOS or Windows. Install with pip or uv:
 
-```bash
-uv add noentenc                  # detection only: fastText and langid, with numpy
-uv add 'noentenc[translation]'   # detection and every translation model
-uv add 'noentenc[onnx]'          # the ONNX detection models (bert-openlid, xlm-roberta-lid)
-uv add 'noentenc[lingua,cld3]'   # extra detection backends, see the table below
-uv add 'noentenc[all]'           # everything
-```
+| To get | pip | uv |
+|---|---|---|
+| Detection: fastText and langid, with numpy | `pip install noentenc` | `uv add noentenc` |
+| Detection and every translation model | `pip install 'noentenc[translation]'` | `uv add 'noentenc[translation]'` |
+| The ONNX detection models (bert-openlid, xlm-roberta-lid) | `pip install 'noentenc[onnx]'` | `uv add 'noentenc[onnx]'` |
+| Extra detection backends, see [the table below](#language-detection) | `pip install 'noentenc[lingua,cld3]'` | `uv add 'noentenc[lingua,cld3]'` |
+| Everything | `pip install 'noentenc[all]'` | `uv add 'noentenc[all]'` |
 
-With pip, the same extras work: `pip install 'noentenc[translation]'`.
+Python 3.10 isn't supported: onnxruntime 1.30, pandas 3 and the current numpy releases have no Python 3.10 wheels. `noentenc[heliport]` installs nothing on Windows, where heliport has no wheel.
 
-Python 3.10 isn't supported: onnxruntime 1.30, pandas 3 and the current numpy releases have no Python 3.10 wheels.
-
-Weights download on first use, to `~/.cache/noentenc` (`NOENTENC_CACHE` or `cache_dir` move it). Nothing is bundled in the wheel. To run offline, download them ahead of time with `noentenc.prepare(...)` and pass `only_local_files=True`; see [Run offline](docs/quickstart.md#run-offline).
+Nothing is bundled in the wheel. Each model downloads the first time it's used, to `~/.cache/noentenc` (`NOENTENC_CACHE` or `cache_dir` move it), and later processes load it from there. The default detector is 0.9 MB, each Opus-MT pair 287 MB and SMaLL-100 595 MB. `noentenc.plan(...)` tells you what a profile would download, and its licences, before it does. To run offline, download the weights ahead of time with `noentenc.prepare(...)` and pass `only_local_files=True`; see [Run offline](docs/quickstart.md#run-offline).
 
 ## Detect a language
 
@@ -95,25 +99,30 @@ from noentenc.translation import Translator
 
 translator = Translator()
 
+# A mixed-language inbox: detect each text's language and translate in one call.
+translator.translate_batch(
+    [
+        "Hola, ¿cuándo llega mi pedido?",
+        "Der Link funktioniert nicht.",
+        "Thanks, it works now.",
+    ],
+    Language.ENGLISH,
+    "auto",
+)
+# ['Hey, when does my order arrive?', "The link doesn't work.", 'Thanks, it works now.']
+
+translator.translate_dataset(df, "review", "review_en", "en", "auto")
+
+# When you know the source language, pass it instead of "auto".
 translator.translate_batch(
     ["Where is the station?", "I love this city."], Language.SPANISH, Language.ENGLISH
 )
 # ['¿Dónde está la estación?', 'Me encanta esta ciudad.']
-
-# A mixed-language inbox: detect each text's language and translate in one call.
-translator.translate_batch(
-    ["Hola, ¿cuándo llega mi pedido?", "Der Link funktioniert nicht.", "Thanks!"],
-    "en",
-    "auto",
-)
-# ['Hey, when does my order arrive?', "The link doesn't work.", 'Thanks!']
-
-translator.translate_dataset(df, "review", "review_en", "en", "auto")
 ```
 
-`Translator()` picks the lightest model for each pair. It uses a dedicated Opus-MT model when one exists for the direction (66 directions, about 75M parameters each). For any other pair it uses SMaLL-100, which covers 100 languages. A model that can't handle a pair raises `UnsupportedLanguageError`. Languages are `Language` members or codes and names: `"es"`, `"spa"`, `"es-ES"` and `"spanish"` all mean Spanish. `noentenc.to_language()` does that conversion on its own, which also turns detector labels like `"spa"` or `"cmn"` into `Language` members.
+`source_language="auto"` detects each text's language, groups the texts by language and translates each group with the model for that pair, then returns them in input order. Texts already in the target language and texts without linguistic content come back unchanged. When the detector isn't sure (`lol`, a name), the text is kept as given with status `unknown_source`. `unknown_source="fallback"` translates such texts without a source language instead, and `unknown_source="raise"` fails the call with `SourceLanguageError`. `detailed=True` reports each text's detected language, score, status and model.
 
-`source_language="auto"` detects each text's language, groups the texts by language and translates each group with the model for that pair, then returns them in input order. Texts already in the target language and texts without linguistic content come back unchanged. When the detector isn't sure (`lol`, a name), the text is kept as given with status `unknown_source`. `unknown_source="fallback"` translates such texts without a source language instead, and `unknown_source="raise"` fails the call with `SourceLanguageError`. `detailed=True` reports each text's detected language, score, status and model. Without a source language, `Translator` can't pick an Opus-MT model, so it uses SMaLL-100 for every text.
+`Translator()` picks the lightest model for each pair. It uses a dedicated Opus-MT model when one exists for the direction (66 directions, about 75M parameters each). For any other pair it uses SMaLL-100, which covers 100 languages, and so does a call with no source language at all. A model that can't handle a pair raises `UnsupportedLanguageError`. Languages are `Language` members or codes and names: `"es"`, `"spa"`, `"es-ES"` and `"spanish"` all mean Spanish. `noentenc.to_language()` does that conversion on its own, which also turns detector labels like `"spa"` or `"cmn"` into `Language` members.
 
 Text of any length works. It is split into sentences, they are translated in one batch, and the translations are joined back with the original spaces, line breaks and blank lines. A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` instead of being cut silently. Pass `truncate=True` to translate only its start, and `detailed=True` to get a `Translation` that says whether input was dropped (`input_truncated`) or the output hit its length limit (`output_limit_reached`).
 
@@ -271,6 +280,8 @@ LanguageDetector(FastTextModel("models/my-domain-lid.ftz"))
 
 ## Development
 
+Development uses [uv](https://docs.astral.sh/uv/).
+
 ```bash
 make install             # uv sync with every extra + dev tools
 make lint
@@ -278,4 +289,4 @@ make unit-tests
 make integration-tests   # tests/integrations; downloads real weights
 ```
 
-`scripts/benchmark_lid.py` and `scripts/benchmark_translation.py` reproduce the speed numbers, and `scripts/benchmark_vs_reference.py` the comparison with the original implementations. `scripts/make_fasttext_fixtures.py` regenerates the fastText parity fixtures with the reference `fasttext` package. That package needs Python 3.12, and the script's docstring has the command. `scripts/make_langid_fixtures.py` does the same for langid with the reference `langid` package.
+`scripts/benchmark_lid.py` and `scripts/benchmark_translation.py` reproduce the speed numbers, and `scripts/benchmark_vs_reference.py` the comparison with the original implementations. `scripts/measure_first_use.py` measures install, first-call and start-up costs from a built wheel, and `scripts/smoke_quickstart.py` runs the README quickstart against one, as CI does. `scripts/make_fasttext_fixtures.py` regenerates the fastText parity fixtures with the reference `fasttext` package. That package needs Python 3.12, and the script's docstring has the command. `scripts/make_langid_fixtures.py` does the same for langid with the reference `langid` package.
