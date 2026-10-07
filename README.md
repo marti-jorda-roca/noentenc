@@ -144,7 +144,7 @@ translator.translate(
 # Without it (preserve=False), Opus-MT writes https://ejemplo.com/reset?id=42: another site.
 ```
 
-See [Keep links and placeholders](docs/quickstart.md#keep-links-and-placeholders) for what is covered and its limits.
+`Translator(keep=["Nike", re.compile(r"SKU-\d+")])` keeps your own terms and patterns the same way. See [Keep links and placeholders](docs/quickstart.md#keep-links-and-placeholders) for what is covered and its limits.
 
 For input too large to hold in memory, `translate_stream` takes any iterable of strings, such as a file's lines or a database cursor. It translates a chunk at a time and yields the results in input order; see [Stream large inputs](docs/quickstart.md#stream-large-inputs). `Translator(num_threads=2)` caps the CPU threads each model uses, for when several workers share a machine.
 
@@ -233,7 +233,7 @@ Results go to stdout and progress and errors to stderr, and the exit code says w
 | [stream_translation.py](docs/examples/stream_translation.py) | Translate a JSON Lines file of any size with `translate_stream`, writing each result as it comes. |
 | [parallel_workers.py](docs/examples/parallel_workers.py) | Split a job across processes and give each translator its share of the cores with `num_threads`. |
 | [plan_and_limit.py](docs/examples/plan_and_limit.py) | See what a profile would download and what it costs, and restrict it by licence and download size. |
-| [preserve_literals.py](docs/examples/preserve_literals.py) | Translate messages without breaking their links, emails, code, tags and placeholders. |
+| [preserve_literals.py](docs/examples/preserve_literals.py) | Translate messages without breaking their links, emails, code, tags, placeholders and brand names. |
 | [translate_bulk.py](docs/examples/translate_bulk.py) | Run bulk jobs with `errors="record"` so one bad row doesn't stop them, and skip model loads for empty, blank and same-language input. |
 | [choose_profile.py](docs/examples/choose_profile.py) | Trade latency for quality with the `speed`, `balance` and `quality` profiles. |
 | [custom_models.py](docs/examples/custom_models.py) | Plug your own detector and translator into the same API. |

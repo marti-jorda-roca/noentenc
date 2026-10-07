@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 from collections import OrderedDict
 from collections.abc import Callable, Hashable
@@ -27,7 +28,7 @@ from noentenc.languages import (
 )
 from noentenc.profiles import Profile
 from noentenc.translation import _routing
-from noentenc.translation._literals import translate_preserving
+from noentenc.translation._literals import compile_keep, translate_preserving
 from noentenc.translation.models.base import (
     BaseModel,
     Translation,
@@ -138,6 +139,12 @@ class Translator:
     a translation loses a placeholder, the prose around the literals is translated piece
     by piece instead, so literals always survive. `preserve=False` turns this off.
 
+    `keep` adds your own literals, such as brand and product names: a string is kept
+    where it appears as a whole word, case included (`"Nike"` but not "Nikes"), and a
+    compiled pattern (`re.compile(r"SKU-[0-9]+")`) wherever it matches. The model
+    sees a placeholder instead of the term, so in languages that inflect nouns the
+    words around it may not agree with it.
+
     Languages can be `Language` members or codes and names that `to_language` accepts,
     such as `"es"`, `"spa"`, `"es-ES"` or `"spanish"`.
     """
@@ -153,7 +160,9 @@ class Translator:
         allowed_licenses: Iterable[str] | None = None,
         max_download_bytes: int | None = None,
         num_threads: int | None = None,
+        keep: Iterable[str | re.Pattern[str]] = (),
     ) -> None:
+        self.keep = compile_keep(keep)
         self.constraints = Constraints.of(allowed_licenses, max_download_bytes)
         self.num_threads = check_int("num_threads", num_threads, optional=True)
         if isinstance(model, BaseModel):
@@ -345,8 +354,9 @@ class Translator:
         unchanged without loading a model. `source_language="auto"` detects it.
 
         URLs, email addresses, mentions, hashtags, numbers, inline code, template
-        placeholders and HTML tags come back byte-for-byte (see `Translation.preservation`);
-        `preserve=False` sends the text to the model as it is.
+        placeholders, HTML tags and the translator's `keep` terms come back byte-for-byte
+        (see `Translation.preservation`); `preserve=False` sends the text to the model
+        as it is.
         """
         (translation,) = self._translate(
             [text],
@@ -722,8 +732,8 @@ class Translator:
                     progress(len(indices))
         return results
 
-    @staticmethod
     def _run(
+        self,
         model: BaseModel,
         texts: list[str],
         target: Language,
@@ -741,7 +751,9 @@ class Translator:
         def translate(batch: list[str]) -> list[Translation]:
             return run(batch) if errors == "raise" else _record_failures(batch, run)
 
-        return translate_preserving(texts, translate) if preserve else translate(texts)
+        if not preserve:
+            return translate(texts)
+        return translate_preserving(texts, translate, self.keep)
 
     def _auto_groups(
         self,

@@ -9,6 +9,10 @@ in 100% of Opus-MT and SMaLL-100 outputs, and 93% of NLLB-200 and M2M100 ones, m
 When a translation drops, repeats or alters a placeholder, the text is translated again
 piece by piece instead: the prose between literals is translated on its own and the
 literals are kept between the pieces, so they are preserved whatever the model does.
+
+Callers can add their own literals (`Translator(keep=...)`): terms such as brand names,
+and regular expressions. Their matches are kept like the built-in ones; where matches
+overlap, the union of them is kept.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from typing import TYPE_CHECKING
 from noentenc.translation.models.base import Translation, TranslationStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 # `Translation.preservation`: how the literals were kept.
 PLACEHOLDERS = "placeholders"
@@ -62,6 +66,46 @@ _BRACKETS = {")": "(", "]": "[", "}": "{"}
 _STEMS = ("ZXQ", "QZX")
 
 
+def compile_keep(
+    terms: Iterable[str | re.Pattern[str]],
+) -> tuple[re.Pattern[str], ...]:
+    """The patterns matching `terms`: strings as whole words, compiled patterns as given.
+
+    A string matches exactly, case included, and not inside a longer word: `"Nike"`
+    matches in "Nike's" but not in "Nikes". All strings share one pattern, longest
+    first, so a text is scanned once however many there are.
+    """
+    if isinstance(terms, (str, re.Pattern)):
+        raise TypeError(
+            f"keep takes a list of strings and compiled patterns, got {terms!r}; "
+            f"wrap it in a list"
+        )
+    words: set[str] = set()
+    patterns: list[re.Pattern[str]] = []
+    for term in terms:
+        if isinstance(term, re.Pattern) and isinstance(term.pattern, str):
+            patterns.append(term)
+        elif isinstance(term, str):
+            if not term.strip():
+                raise ValueError("keep terms can't be empty or whitespace")
+            words.add(term)
+        else:
+            raise TypeError(
+                f"keep terms must be strings or re.compile() str patterns, got {term!r}"
+            )
+    if words:
+        ordered = sorted(words, key=lambda word: (-len(word), word))
+        patterns.insert(0, re.compile("|".join(map(_whole_word, ordered))))
+    return tuple(patterns)
+
+
+def _whole_word(term: str) -> str:
+    """`term` escaped, not matching where a word character continues it."""
+    before = r"(?<!\w)" if re.match(r"\w", term[0]) else ""
+    after = r"(?!\w)" if re.match(r"\w", term[-1]) else ""
+    return before + re.escape(term) + after
+
+
 @dataclass(frozen=True)
 class Masked:
     """A text with its literals swapped for placeholders.
@@ -97,20 +141,35 @@ class Masked:
         return translated
 
 
-def find_literals(text: str) -> list[tuple[int, int]]:
-    """`(start, end)` of every literal in `text`, in order."""
+def find_literals(
+    text: str, keep: tuple[re.Pattern[str], ...] = ()
+) -> list[tuple[int, int]]:
+    """`(start, end)` of every literal in `text`, in order, with `keep`'s matches.
+
+    Overlapping literals are merged into one.
+    """
     spans: list[tuple[int, int]] = []
     for match in _LITERAL.finditer(text):
         start, end = match.span()
         if match.lastgroup in ("url", "domain"):
             end = _trim(text, start, end)
         spans.append((start, end))
-    return spans
+    if not keep:
+        return spans
+    for pattern in keep:
+        spans += [m.span() for m in pattern.finditer(text) if m.end() > m.start()]
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
-def mask(text: str) -> Masked | None:
+def mask(text: str, keep: tuple[re.Pattern[str], ...] = ()) -> Masked | None:
     """`text` with its literals replaced, or None when it has none or no stem is free."""
-    spans = find_literals(text)
+    spans = find_literals(text, keep)
     if not spans:
         return None
     stem = next((s for s in _STEMS if s.lower() not in text.lower()), None)
@@ -132,11 +191,13 @@ def mask(text: str) -> Masked | None:
     )
 
 
-def split_at_literals(text: str) -> list[tuple[str, bool]]:
+def split_at_literals(
+    text: str, keep: tuple[re.Pattern[str], ...] = ()
+) -> list[tuple[str, bool]]:
     """`text` as `(piece, is_literal)` pieces, literals and the prose between them."""
     pieces: list[tuple[str, bool]] = []
     position = 0
-    for start, end in find_literals(text):
+    for start, end in find_literals(text, keep):
         if start > position:
             pieces.append((text[position:start], False))
         pieces.append((text[start:end], True))
@@ -162,19 +223,21 @@ def _trim(text: str, start: int, end: int) -> int:
 
 
 def translate_preserving(
-    texts: list[str], translate: Callable[[list[str]], list[Translation]]
+    texts: list[str],
+    translate: Callable[[list[str]], list[Translation]],
+    keep: tuple[re.Pattern[str], ...] = (),
 ) -> list[Translation]:
-    """`translate(texts)`, with every literal in the texts kept byte-for-byte.
+    """`translate(texts)`, with every literal in the texts, and `keep`'s matches, kept.
 
     Texts are translated with placeholders first. Those whose placeholders don't come
     back intact, or that have no free placeholder stem, are translated piece by piece.
     """
-    masks = [mask(text) for text in texts]
+    masks = [mask(text, keep) for text in texts]
     # Texts with literals but no free placeholder stem go straight to piecewise.
     piecewise = [
         i
         for i, (text, masked) in enumerate(zip(texts, masks, strict=True))
-        if masked is None and find_literals(text)
+        if masked is None and find_literals(text, keep)
     ]
     skipped = set(piecewise)
     first = [i for i in range(len(texts)) if i not in skipped]
@@ -196,7 +259,7 @@ def translate_preserving(
             results[i] = replace(result, text=restored, preservation=PLACEHOLDERS)
     for i, result in zip(
         piecewise,
-        _translate_pieces([texts[i] for i in piecewise], translate),
+        _translate_pieces([texts[i] for i in piecewise], translate, keep),
         strict=True,
     ):
         results[i] = result
@@ -208,12 +271,14 @@ def _model_input(text: str, masked: Masked | None) -> str:
 
 
 def _translate_pieces(
-    texts: list[str], translate: Callable[[list[str]], list[Translation]]
+    texts: list[str],
+    translate: Callable[[list[str]], list[Translation]],
+    keep: tuple[re.Pattern[str], ...],
 ) -> list[Translation]:
     """Translate the prose between each text's literals, in one batch, and join it back."""
     if not texts:
         return []
-    split = [split_at_literals(text) for text in texts]
+    split = [split_at_literals(text, keep) for text in texts]
     # (text, piece) of every piece to translate, with its surrounding whitespace removed.
     jobs = [
         (t, p)
