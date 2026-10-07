@@ -18,6 +18,7 @@ import io
 import itertools
 import json
 import os
+import re
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict
@@ -205,6 +206,28 @@ def detect(
             _write(detection.language)
 
 
+def _check_terms(
+    _ctx: click.Context, _param: click.Parameter, values: Sequence[str]
+) -> list[str]:
+    if any(not value.strip() for value in values):
+        raise click.BadParameter("terms can't be empty or whitespace")
+    return list(values)
+
+
+def _compile_patterns(
+    _ctx: click.Context, _param: click.Parameter, values: Sequence[str]
+) -> list[re.Pattern[str]]:
+    patterns: list[re.Pattern[str]] = []
+    for value in values:
+        try:
+            patterns.append(re.compile(value))
+        except re.error as error:
+            raise click.BadParameter(
+                f"{value!r} isn't a valid regex: {error}"
+            ) from None
+    return patterns
+
+
 @cli.command()
 @_input_options
 @click.option(
@@ -237,9 +260,28 @@ def detect(
     "failing the text.",
 )
 @click.option(
+    "--keep",
+    "keep_terms",
+    multiple=True,
+    metavar="TERM",
+    callback=_check_terms,
+    help="Keep this term as it is, e.g. a brand name, where it appears as a whole "
+    "word. Repeat for more terms.",
+)
+@click.option(
+    "--keep-regex",
+    "keep_patterns",
+    multiple=True,
+    metavar="PATTERN",
+    callback=_compile_patterns,
+    help="Keep whatever this Python regular expression matches, e.g. 'SKU-[0-9]+'. "
+    "Repeat for more patterns.",
+)
+@click.option(
     "--no-preserve",
     is_flag=True,
-    help="Send URLs, emails, code and placeholders to the model like any other text.",
+    help="Send URLs, emails, code, placeholders and --keep terms to the model like "
+    "any other text.",
 )
 @_profile_options
 def translate(
@@ -252,6 +294,8 @@ def translate(
     source: str,
     unknown_source: UnknownSourcePolicy,
     truncate: bool,
+    keep_terms: list[str],
+    keep_patterns: list[re.Pattern[str]],
     no_preserve: bool,
     profile: str,
     cache_dir: Path | None,
@@ -268,7 +312,12 @@ def translate(
       cat reviews.txt | noentenc translate --to en --json > reviews.jsonl
     """
     lines = _read_texts(texts, file)
-    translator = Translator(profile, only_local_files=offline, cache_dir=cache_dir)
+    translator = Translator(
+        profile,
+        only_local_files=offline,
+        cache_dir=cache_dir,
+        keep=[*keep_terms, *keep_patterns],
+    )
     inputs, feed = itertools.tee(lines)
     results = translator.translate_stream(
         feed,

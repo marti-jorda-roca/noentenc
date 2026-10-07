@@ -52,6 +52,15 @@ By default each text's language is detected (`--from auto`), as with `source_lan
 
 When the detector can't tell a text's language, or no model translates it, the text is printed as given. `--unknown-source fallback` translates such texts without a source language instead, and `--unknown-source raise` stops with exit code 4. `--truncate` translates the start of a sentence that is too long for the model instead of failing the text, and `--no-preserve` stops keeping URLs, emails, code and placeholders as they are.
 
+`--keep TERM` keeps a term, such as a brand name, as it is wherever it appears as a whole word, and `--keep-regex PATTERN` keeps whatever a Python regular expression matches. Repeat either for more:
+
+```bash
+noentenc translate --from en --to es --keep "Apple Watch" --keep-regex 'SKU-[0-9]+' \
+  "Your Apple Watch (SKU-4821) arrives tomorrow."
+# Su Apple Watch (SKU-4821) llega mañana.
+# Without --keep: Tu reloj Apple (SKU-4821) llega mañana.
+```
+
 `--json` adds each text's status, source language, detected language and model:
 
 ```bash

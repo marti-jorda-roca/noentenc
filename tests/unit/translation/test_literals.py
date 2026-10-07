@@ -8,6 +8,7 @@ import pytest
 from noentenc import Language
 from noentenc.translation import Translation, TranslationStatus, Translator
 from noentenc.translation._literals import (
+    compile_keep,
     find_literals,
     mask,
     split_at_literals,
@@ -18,8 +19,8 @@ from tests.unit.translation.test_translator import UpperModel
 ES = Language.SPANISH
 
 
-def literals(text: str) -> list[str]:
-    return [text[a:b] for a, b in find_literals(text)]
+def literals(text: str, keep: tuple[re.Pattern[str], ...] = ()) -> list[str]:
+    return [text[a:b] for a, b in find_literals(text, keep)]
 
 
 @pytest.mark.parametrize(
@@ -221,3 +222,81 @@ def test_recorded_failures_return_the_original_text() -> None:
     assert ok.text == "ONE https://a.io:es"
     assert failed.status is TranslationStatus.FAILED
     assert failed.text == "two https://b.io"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # Whole words only, case included.
+        ("Nike and Nike's shoes", ["Nike", "Nike"]),
+        ("Nikes, nike, NIKE, PreNike", []),
+        # The longest term wins where terms overlap.
+        ("New Nike Air Max today", ["Nike Air Max"]),
+        # Terms starting or ending in punctuation still match.
+        ("Built with C++ and .NET.", ["C++", ".NET"]),
+    ],
+)
+def test_keep_terms(text: str, expected: list[str]) -> None:
+    keep = compile_keep(["Nike", "Nike Air Max", "C++", ".NET"])
+    assert literals(text, keep) == expected
+
+
+def test_keep_patterns_match_as_given() -> None:
+    keep = compile_keep([re.compile(r"sku-\d+", re.IGNORECASE), re.compile(r"x*")])
+    # Empty matches are ignored.
+    assert literals("Order SKU-12 and sku-7", keep) == ["SKU-12", "sku-7"]
+
+
+def test_keep_merges_overlaps_with_built_in_literals() -> None:
+    keep = compile_keep(["Nike Air 90", "acme"])
+    # "90" is a number literal inside the term; "acme" is inside a URL.
+    assert literals("Buy Nike Air 90 at https://acme.io/shop", keep) == [
+        "Nike Air 90",
+        "https://acme.io/shop",
+    ]
+    masked = mask("Buy Nike Air 90 at https://acme.io/shop", keep)
+    assert masked is not None
+    assert masked.text == "Buy ZXQ0 at ZXQ1"
+
+
+@pytest.mark.parametrize(
+    ("keep", "error"),
+    [
+        ("Nike", TypeError),
+        (re.compile("Nike"), TypeError),
+        ([""], ValueError),
+        (["  "], ValueError),
+        ([42], TypeError),
+        ([re.compile(b"Nike")], TypeError),
+    ],
+)
+def test_compile_keep_rejects_bad_terms(keep: object, error: type[Exception]) -> None:
+    with pytest.raises(error):
+        compile_keep(keep)  # ty: ignore[invalid-argument-type]
+
+
+def test_keep_terms_survive_both_paths() -> None:
+    keep = compile_keep(["Nike"])
+    (kept,) = translate_preserving(["i love nike and Nike"], upper, keep)
+    assert kept.text == "I LOVE NIKE AND Nike"
+    assert kept.preservation == "placeholders"
+
+    def drops_placeholders(texts: list[str]) -> list[Translation]:
+        return [Translation(re.sub(r"ZXQ\d+", "", text).upper()) for text in texts]
+
+    (pieces,) = translate_preserving(["buy Nike now"], drops_placeholders, keep)
+    assert pieces.text == "BUY Nike NOW"
+    assert pieces.preservation == "segments"
+
+
+def test_translator_keep() -> None:
+    translator = Translator(UpperModel(), keep=["Nike", re.compile(r"SKU-\d+")])
+    assert translator.translate("buy Nike SKU-42 at acme.io", ES, "en") == (
+        "BUY Nike SKU-42 AT acme.io:es"
+    )
+    assert translator.translate_batch(["nike", "Nike"], ES, "en") == [
+        "NIKE:es",
+        "Nike:es",
+    ]
+    # preserve=False sends the terms to the model too.
+    assert translator.translate("Nike", ES, "en", preserve=False) == "NIKE:es"

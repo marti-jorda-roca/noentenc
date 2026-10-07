@@ -199,6 +199,19 @@ translator.translate(
 
 If the translation drops, repeats or changes a placeholder, the text is translated again in pieces. The prose between the literals is translated on its own and the literals are kept between the pieces, so they always survive, though the prose can read a little less fluently. The detailed result's `preservation` says which path was taken: `"placeholders"`, `"segments"`, or `None` when the text had no literals. Pass `preserve=False` to send texts to the model untouched.
 
+Add your own terms with `keep`, such as brand and product names. A string is kept where it appears as a whole word, with the same case: `"Nike"` matches in "Nike's" but not in "Nikes" or "NIKE". A compiled pattern is kept wherever it matches, so `re.compile(r"nike", re.I)` ignores case. Where a term overlaps another literal, such as `"Acme"` inside `https://acme.io`, both are kept as one.
+
+```python
+import re
+
+translator = Translator(keep=["Apple Watch", "Amazon", re.compile(r"SKU-\d+")])
+translator.translate("I ordered an Apple Watch from Amazon.", "es", "en")
+# 'Pedí un Apple Watch a Amazon.'
+# Without keep, Opus-MT writes 'Pedí un reloj de Apple desde Amazon.'
+```
+
+The model sees a placeholder instead of the term, so it can't make the words around it agree with it. German Opus-MT writes "einen Apple Watch" instead of "eine Apple Watch", and "Amazon Lager" instead of the compound "Amazon-Lager". Keep the terms that the model gets wrong, not every name.
+
 Limits:
 
 - Only the literals above are protected. Markdown emphasis (`**bold**`), lists and headings, and the text inside HTML tags, are translated like any other text, and a model may move or drop the markup around them.

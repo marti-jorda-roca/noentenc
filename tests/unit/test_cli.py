@@ -118,6 +118,34 @@ def test_translate_prints_one_translation_per_text(cache: Path) -> None:
 
 
 @pytest.mark.usefixtures("fake_models")
+def test_translate_keeps_terms_and_patterns(cache: Path) -> None:
+    result = run(
+        "translate",
+        *offline(cache),
+        "--from",
+        "es",
+        "--to",
+        "en",
+        "--keep",
+        "Nike",
+        "--keep-regex",
+        "SKU-[0-9]+",
+        "compra Nike SKU-7",
+    )
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == ["COMPRA Nike SKU-7:en"]
+
+
+@pytest.mark.parametrize("option", [("--keep", " "), ("--keep-regex", "(")])
+def test_translate_rejects_bad_keep_options(
+    cache: Path, option: tuple[str, str]
+) -> None:
+    result = run("translate", *offline(cache), "--to", "en", *option, "hola")
+    assert result.exit_code == 2
+    assert option[0] in result.stderr
+
+
+@pytest.mark.usefixtures("fake_models")
 def test_translate_detects_the_source_by_default(cache: Path) -> None:
     result = run(
         "translate", *offline(cache), "--to", "en", "--json", stdin="el perro corrió\n"

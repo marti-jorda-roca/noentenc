@@ -1,8 +1,12 @@
 """Translate support messages without breaking their links, emails, code and placeholders.
 
+Brand and product names, and patterns such as SKUs, can be kept too (`keep=`).
+
 Run: uv run python docs/examples/preserve_literals.py
 Downloads Opus-MT en→es (287 MB) on first run.
 """
+
+import re
 
 from noentenc import Language
 from noentenc.translation import Translator
@@ -34,3 +38,14 @@ print(
     )
 )
 # Visite https://ejemplo.com/reset?id=42 o envíe un correo electrónico a support@acme.io
+
+# Your own terms: brand names as whole words, and regular expressions.
+branded = Translator(keep=["Apple Watch", re.compile(r"SKU-\d+")])
+print(
+    branded.translate(
+        "Your Apple Watch (SKU-4821) arrives tomorrow.",
+        Language.SPANISH,
+        Language.ENGLISH,
+    )
+)
+# Su Apple Watch (SKU-4821) llega mañana.
