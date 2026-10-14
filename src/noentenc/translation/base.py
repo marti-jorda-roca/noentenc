@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final, Literal, overload
 
@@ -28,7 +28,14 @@ from noentenc.languages import (
 )
 from noentenc.profiles import Profile
 from noentenc.translation import _routing
-from noentenc.translation._literals import compile_keep, translate_preserving
+from noentenc.translation._literals import (
+    LiteralKind,
+    LiteralSpan,
+    check_kinds,
+    compile_keep,
+    find_literals,
+    translate_preserving,
+)
 from noentenc.translation.models.base import (
     BaseModel,
     Translation,
@@ -36,7 +43,7 @@ from noentenc.translation.models.base import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterator
     from pathlib import Path
 
     import pandas as pd
@@ -54,6 +61,9 @@ UnknownSourcePolicy = Literal["keep", "fallback", "raise"]
 
 # Pass as `source_language` to detect each text's language.
 AUTO: Final = "auto"
+
+# Which literals to keep: every kind (True), none (False), or the kinds listed.
+PreservePolicy = bool | Iterable[LiteralKind | str]
 
 # Models a profile-based `Translator` keeps loaded at once. Two cover a pair model plus the
 # SMaLL-100 fallback; see docs/benchmarks.md#memory for the RAM each model takes.
@@ -137,7 +147,10 @@ class Translator:
     code, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags and Markdown
     link targets are swapped for placeholders the models copy through, then put back. If
     a translation loses a placeholder, the prose around the literals is translated piece
-    by piece instead, so literals always survive. `preserve=False` turns this off.
+    by piece instead, so literals always survive. `preserve=False` turns this off, and a
+    list of `LiteralKind`s keeps only those kinds (and the `keep` terms): leaving out
+    `"number"` lets the model make the words around a number agree with it.
+    `find_literals()` shows what would be kept.
 
     `keep` adds your own literals, such as brand and product names: a string is kept
     where it appears as a whole word, case included (`"Nike"` but not "Nikes"), and a
@@ -278,6 +291,19 @@ class Translator:
             target=frozenset(targets),
         )
 
+    def find_literals(
+        self, text: str, preserve: PreservePolicy = True
+    ) -> list[LiteralSpan]:
+        """The literals translating `text` with `preserve` would keep, in order.
+
+        Each has its `LiteralKind` (None for a `keep` term), position and text. Loads
+        nothing.
+        """
+        kinds = check_kinds(preserve)
+        if kinds is None:
+            return []
+        return find_literals(text, self.keep, kinds)
+
     def _choice_or_none(
         self, source: Language | None, target: Language
     ) -> _routing.ModelChoice | None:
@@ -316,7 +342,7 @@ class Translator:
         truncate: bool = False,
         detailed: Literal[False] = False,
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> str: ...
 
     @overload
@@ -329,7 +355,7 @@ class Translator:
         truncate: bool = False,
         detailed: Literal[True],
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> Translation: ...
 
     def translate(
@@ -341,7 +367,7 @@ class Translator:
         truncate: bool = False,
         detailed: bool = False,
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> str | Translation:
         """Translate `text`, sentence by sentence, keeping its whitespace and line breaks.
 
@@ -356,7 +382,7 @@ class Translator:
         URLs, email addresses, mentions, hashtags, numbers, inline code, template
         placeholders, HTML tags and the translator's `keep` terms come back byte-for-byte
         (see `Translation.preservation`); `preserve=False` sends the text to the model
-        as it is.
+        as it is, and a list of `LiteralKind`s keeps only those kinds and `keep`'s terms.
         """
         (translation,) = self._translate(
             [text],
@@ -382,7 +408,7 @@ class Translator:
         detailed: Literal[False] = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> list[str]: ...
 
     @overload
@@ -397,7 +423,7 @@ class Translator:
         detailed: Literal[True],
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> list[Translation]: ...
 
     def translate_batch(
@@ -411,7 +437,7 @@ class Translator:
         detailed: bool = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> list[str] | list[Translation]:
         """Translate each of `texts`, like `translate`, in input order.
 
@@ -448,7 +474,7 @@ class Translator:
         detailed: Literal[False] = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> Iterator[str]: ...
 
     @overload
@@ -464,7 +490,7 @@ class Translator:
         detailed: Literal[True],
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> Iterator[Translation]: ...
 
     def translate_stream(
@@ -479,7 +505,7 @@ class Translator:
         detailed: bool = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> Iterator[str] | Iterator[Translation]:
         """Translate `texts` as they are read, yielding each result in input order.
 
@@ -504,6 +530,7 @@ class Translator:
         _check_arguments(
             target_language, source_language, batch_size, errors, unknown_source
         )
+        check_kinds(preserve)
         translations = self._translate_chunks(
             stream_chunks(texts, chunk_size),
             target_language,
@@ -525,7 +552,7 @@ class Translator:
         truncate: bool,
         errors: ErrorPolicy,
         unknown_source: UnknownSourcePolicy,
-        preserve: bool,
+        preserve: PreservePolicy,
     ) -> Iterator[Translation]:
         offset = 0
         for chunk in chunks:
@@ -559,7 +586,7 @@ class Translator:
         unknown_source: UnknownSourcePolicy = "keep",
         status_column: str | None = None,
         source_column: str | None = None,
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> pl.DataFrame: ...
 
     @overload
@@ -579,7 +606,7 @@ class Translator:
         unknown_source: UnknownSourcePolicy = "keep",
         status_column: str | None = None,
         source_column: str | None = None,
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> pd.DataFrame: ...
 
     def translate_dataset(
@@ -598,7 +625,7 @@ class Translator:
         unknown_source: UnknownSourcePolicy = "keep",
         status_column: str | None = None,
         source_column: str | None = None,
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> pl.DataFrame | pd.DataFrame:
         """Return `dataset` with `result_column` holding the translation of `target_column`.
 
@@ -618,6 +645,7 @@ class Translator:
         _check_arguments(
             target_language, source_language, batch_size, errors, unknown_source
         )
+        check_kinds(preserve)
         values = column_values(dataset, target_column)
         rows = [i for i, value in enumerate(values) if isinstance(value, str)]
         with tqdm(
@@ -667,7 +695,7 @@ class Translator:
         unknown_source: UnknownSourcePolicy,
         progress: Callable[[int], object] | None = None,
         *,
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
         offset: int = 0,
     ) -> list[Translation]:
         """Translate `texts`, answering what needs no model before loading one.
@@ -678,6 +706,7 @@ class Translator:
         target, source, auto = _check_arguments(
             target_language, source_language, batch_size, errors, unknown_source
         )
+        kinds = check_kinds(preserve)
         # Blank texts and same-language requests stay as given; translate the rest.
         results = [
             Translation(t, status=TranslationStatus.UNCHANGED, source_language=source)
@@ -718,7 +747,7 @@ class Translator:
                     batch_size,
                     truncate,
                     errors,
-                    preserve,
+                    kinds,
                 )
                 for i, translation in zip(indices, translated, strict=True):
                     results[i] = replace(
@@ -741,8 +770,10 @@ class Translator:
         batch_size: int,
         truncate: bool,
         errors: ErrorPolicy,
-        preserve: bool,
+        kinds: frozenset[LiteralKind] | None,
     ) -> list[Translation]:
+        """`kinds` are the literals to keep, with `keep`'s terms; None keeps nothing."""
+
         def run(batch: list[str]) -> list[Translation]:
             return model.predict_batch_detailed(
                 batch, target, source, batch_size, truncate=truncate
@@ -751,9 +782,9 @@ class Translator:
         def translate(batch: list[str]) -> list[Translation]:
             return run(batch) if errors == "raise" else _record_failures(batch, run)
 
-        if not preserve:
+        if kinds is None:
             return translate(texts)
-        return translate_preserving(texts, translate, self.keep)
+        return translate_preserving(texts, translate, self.keep, kinds)
 
     def _auto_groups(
         self,

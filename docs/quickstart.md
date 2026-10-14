@@ -182,13 +182,13 @@ Blank texts, and texts whose source language is already the target, come back un
 
 Machine translation models translate everything they see, including the parts that must not change. Opus-MT turns `https://example.com/reset` into `https://ejemplo.com/reset`, which is a different site. So before a text reaches the model, `Translator` swaps these literals for placeholders the models copy through, and puts them back afterwards:
 
-- URLs (`https://…`, `www.…`) and bare domains with a lowercase ending (`acme.io/help`). A sentence's full stop or an unmatched closing bracket after a URL isn't part of it.
-- Email addresses, `@mentions` and `#hashtags`.
-- Numbers, including decimals, thousands separators, times and dates (`1,299.99`, `14:30`, `12/05/2026`).
-- Inline code in backticks.
-- Template placeholders: `{name}`, `{0}`, `{{name}}`, `${name}`, `%s`, `%d` and `%(name)s`.
-- HTML and XML tags and character references (`<a href="…">`, `</b>`, `&amp;`).
-- Markdown link targets, `](https://…)`. The link text is translated.
+- `url`: URLs (`https://…`, `www.…`) and bare domains with a lowercase ending (`acme.io/help`). A sentence's full stop or an unmatched closing bracket after a URL isn't part of it.
+- `email`, `mention` and `hashtag`: email addresses, `@mentions` and `#hashtags`.
+- `number`: numbers, including decimals, thousands separators, times and dates (`1,299.99`, `14:30`, `12/05/2026`).
+- `code`: inline code in backticks.
+- `placeholder`: template placeholders, `{name}`, `{0}`, `{{name}}`, `${name}`, `%s`, `%d` and `%(name)s`.
+- `tag`: HTML and XML tags and character references (`<a href="…">`, `</b>`, `&amp;`).
+- `link_target`: Markdown link targets, `](https://…)`. The link text is translated.
 
 ```python
 translator.translate(
@@ -212,11 +212,42 @@ translator.translate("I ordered an Apple Watch from Amazon.", "es", "en")
 
 The model sees a placeholder instead of the term, so it can't make the words around it agree with it. German Opus-MT writes "einen Apple Watch" instead of "eine Apple Watch", and "Amazon Lager" instead of the compound "Amazon-Lager". Keep the terms that the model gets wrong, not every name.
 
+#### Choose what to keep
+
+The names in the list above are `LiteralKind`s (from `noentenc.translation`). Pass `preserve` a list of them to keep only those kinds. Numbers are the kind most worth leaving out: the model sees `ZXQ0` where the number was, so it can't make the words around it agree, and the sentence reads wrong.
+
+```python
+from noentenc.translation import LiteralKind
+
+no_numbers = set(LiteralKind) - {LiteralKind.NUMBER}
+translator.translate("Mix 200 grams of flour with 3 eggs.", "es", "en")
+# 'Mezclar los gramos 200 de harina con los huevos 3.'
+translator.translate(
+    "Mix 200 grams of flour with 3 eggs.", "es", "en", preserve=no_numbers
+)
+# 'Mezclar 200 gramos de harina con 3 huevos.'
+translator.translate("He died at age 37.", "es", "en", preserve=no_numbers)
+# 'Murió a los 37 años.' (with numbers kept: 'Murió a la edad de 37.')
+```
+
+The price is the number's format: the model may rewrite it, and not always correctly (see the limits below). `keep` terms are kept whatever kinds you pass, so `preserve=[]` keeps only them; `preserve=False` keeps nothing. `translate_batch`, `translate_stream` and `translate_dataset` take the same argument.
+
+To see what a call would keep, ask the translator. It loads no model.
+
+```python
+translator.find_literals("Ping @ana at 14:30 about https://a.io/x.")
+# [LiteralSpan(kind=<LiteralKind.MENTION: 'mention'>, start=5, end=9, text='@ana'),
+#  LiteralSpan(kind=<LiteralKind.NUMBER: 'number'>, start=13, end=18, text='14:30'),
+#  LiteralSpan(kind=<LiteralKind.URL: 'url'>, start=25, end=39, text='https://a.io/x')]
+```
+
+It takes the same `preserve` argument. A match of a `keep` term has `kind=None`, and literals that overlap come back as one span.
+
 Limits:
 
 - Only the literals above are protected. Markdown emphasis (`**bold**`), lists and headings, and the text inside HTML tags, are translated like any other text, and a model may move or drop the markup around them.
 - Words can move across tags. German Opus-MT turns `Click <a>here</a> to…` into `Klicken Sie hier <a></a>, um…`. The tags are intact, but the link now wraps nothing.
-- Protected numbers keep their source format: `1,299.99` stays `1,299.99` in Spanish rather than becoming the locale's `1.299,99`. Without preservation it's no better: Opus-MT writes `1,299,99` or `1.299.99`, neither of which is correct.
+- Protected numbers keep their source format: `1,299.99` stays `1,299.99` in Spanish rather than becoming the locale's `1.299,99`. Without preservation it's no better: Opus-MT writes `1,299,99` or `1.299.99`, neither of which is correct. Leaving `number` out of `preserve` trades this for sentences that agree with their numbers, as shown above.
 - This isn't a document translator. Long HTML or Markdown documents work best when you translate their text nodes yourself.
 
 [Benchmarks](benchmarks.md#literal-text) has how often each model keeps literals with and without preservation.

@@ -1,6 +1,7 @@
 """Translate support messages without breaking their links, emails, code and placeholders.
 
-Brand and product names, and patterns such as SKUs, can be kept too (`keep=`).
+Brand and product names, and patterns such as SKUs, can be kept too (`keep=`), and
+`preserve=` chooses which kinds of literal to keep.
 
 Run: uv run python docs/examples/preserve_literals.py
 Downloads Opus-MT en→es (287 MB) on first run.
@@ -9,7 +10,7 @@ Downloads Opus-MT en→es (287 MB) on first run.
 import re
 
 from noentenc import Language
-from noentenc.translation import Translator
+from noentenc.translation import LiteralKind, Translator
 
 translator = Translator()
 messages = [
@@ -49,3 +50,24 @@ print(
     )
 )
 # Su Apple Watch (SKU-4821) llega mañana.
+
+# Keep only some kinds. A masked number can't agree with the words around it, so
+# leaving numbers to the model reads better, at the cost of their format.
+no_numbers = set(LiteralKind) - {LiteralKind.NUMBER}
+recipe = "Mix 200 grams of flour with 3 eggs."
+print(translator.translate(recipe, Language.SPANISH, Language.ENGLISH))
+# Mezclar los gramos 200 de harina con los huevos 3.
+print(
+    translator.translate(
+        recipe, Language.SPANISH, Language.ENGLISH, preserve=no_numbers
+    )
+)
+# Mezclar 200 gramos de harina con 3 huevos.
+
+# What a call would keep, without loading a model.
+for span in translator.find_literals(messages[1]):
+    print(span.kind, span.text)
+# placeholder {name}
+# number 4821
+# number 14:30
+# number 12/05/2026

@@ -50,7 +50,7 @@ noentenc translate --to en --file inbox.txt
 
 By default each text's language is detected (`--from auto`), as with `source_language="auto"`. Texts already in the target language and texts without linguistic content are printed unchanged. Pass `--from es` when you know the source language. Languages are codes or names: `en`, `eng`, `en-US` and `english` all work.
 
-When the detector can't tell a text's language, or no model translates it, the text is printed as given. `--unknown-source fallback` translates such texts without a source language instead, and `--unknown-source raise` stops with exit code 4. `--truncate` translates the start of a sentence that is too long for the model instead of failing the text, and `--no-preserve` stops keeping URLs, emails, code and placeholders as they are.
+When the detector can't tell a text's language, or no model translates it, the text is printed as given. `--unknown-source fallback` translates such texts without a source language instead, and `--unknown-source raise` stops with exit code 4. `--truncate` translates the start of a sentence that is too long for the model instead of failing the text, and `--no-preserve` stops keeping URLs, emails, code and placeholders as they are. `--no-preserve-kind KIND` stops keeping only one kind, such as `--no-preserve-kind number`, so the words around numbers agree with them; repeat it for more kinds.
 
 `--keep TERM` keeps a term, such as a brand name, as it is wherever it appears as a whole word, and `--keep-regex PATTERN` keeps whatever a Python regular expression matches. Repeat either for more:
 

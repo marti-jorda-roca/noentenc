@@ -1,13 +1,21 @@
 """URLs, emails, code, placeholders, tags and numbers survive translation byte-for-byte."""
 
 import re
+from collections.abc import Iterator
 
 import polars as pl
 import pytest
 
 from noentenc import Language
-from noentenc.translation import Translation, TranslationStatus, Translator
+from noentenc.translation import (
+    LiteralKind,
+    LiteralSpan,
+    Translation,
+    TranslationStatus,
+    Translator,
+)
 from noentenc.translation._literals import (
+    check_kinds,
     compile_keep,
     find_literals,
     mask,
@@ -20,7 +28,7 @@ ES = Language.SPANISH
 
 
 def literals(text: str, keep: tuple[re.Pattern[str], ...] = ()) -> list[str]:
-    return [text[a:b] for a, b in find_literals(text, keep)]
+    return [span.text for span in find_literals(text, keep)]
 
 
 @pytest.mark.parametrize(
@@ -300,3 +308,111 @@ def test_translator_keep() -> None:
     ]
     # preserve=False sends the terms to the model too.
     assert translator.translate("Nike", ES, "en", preserve=False) == "NIKE:es"
+
+
+def test_find_literals_reports_kinds_and_positions() -> None:
+    text = "Ping @ana at 14:30 about https://a.io/x."
+    assert find_literals(text) == [
+        LiteralSpan(LiteralKind.MENTION, 5, 9, "@ana"),
+        LiteralSpan(LiteralKind.NUMBER, 13, 18, "14:30"),
+        LiteralSpan(LiteralKind.URL, 25, 39, "https://a.io/x"),
+    ]
+
+
+def test_kinds_select_the_literals_found() -> None:
+    text = "Mix 200 g at 14:30, see https://a.io or #recipes"
+    no_numbers = frozenset(LiteralKind) - {LiteralKind.NUMBER}
+    assert [s.text for s in find_literals(text, kinds=no_numbers)] == [
+        "https://a.io",
+        "#recipes",
+    ]
+    assert find_literals(text, kinds=frozenset()) == []
+    # Without the number pattern, nothing else claims the digits.
+    assert [s.text for s in find_literals("v 1.2.3", kinds=no_numbers)] == []
+
+
+def test_keep_matches_have_no_kind_and_merge_into_the_first_literal() -> None:
+    keep = compile_keep(["Nike Air 90", "acme"])
+    spans = find_literals("Buy Nike Air 90 at https://acme.io/shop", keep)
+    assert [(s.kind, s.text) for s in spans] == [
+        (None, "Nike Air 90"),
+        (LiteralKind.URL, "https://acme.io/shop"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("preserve", "expected"),
+    [
+        (True, frozenset(LiteralKind)),
+        (False, None),
+        ([], frozenset()),
+        (["url", LiteralKind.EMAIL], {LiteralKind.URL, LiteralKind.EMAIL}),
+    ],
+)
+def test_check_kinds(preserve: object, expected: object) -> None:
+    assert check_kinds(preserve) == expected  # ty: ignore[invalid-argument-type]
+
+
+@pytest.mark.parametrize(
+    ("preserve", "error"),
+    [("url", TypeError), (["urls"], ValueError), ([None], ValueError)],
+)
+def test_check_kinds_rejects_bad_values(
+    preserve: object, error: type[Exception]
+) -> None:
+    with pytest.raises(error):
+        check_kinds(preserve)  # ty: ignore[invalid-argument-type]
+
+
+def test_preserve_kinds_keep_only_those_kinds(translator: Translator) -> None:
+    text = "see #deals at https://a.io"
+    assert translator.translate(text, ES, "en", preserve=["url"]) == (
+        "SEE #DEALS AT https://a.io:es"
+    )
+    assert translator.translate_batch([text], ES, "en", preserve=["hashtag"]) == [
+        "SEE #deals AT HTTPS://A.IO:es"
+    ]
+    assert list(translator.translate_stream([text], ES, "en", preserve=[])) == [
+        text.upper() + ":es"
+    ]
+    frame = pl.DataFrame({"text": [text]})
+    out = translator.translate_dataset(frame, "text", "es", ES, "en", preserve=["url"])
+    assert out["es"].to_list() == ["SEE #DEALS AT https://a.io:es"]
+
+
+def test_empty_preserve_still_keeps_keep_terms() -> None:
+    translator = Translator(UpperModel(), keep=["Nike"])
+    assert translator.translate("buy Nike at acme.io", ES, "en", preserve=[]) == (
+        "BUY Nike AT ACME.IO:es"
+    )
+
+
+def test_bad_preserve_fails_before_reading_or_translating(
+    translator: Translator,
+) -> None:
+    def never_read() -> Iterator[str]:
+        raise AssertionError("read")
+        yield ""
+
+    with pytest.raises(ValueError, match="unknown literal kind"):
+        translator.translate_stream(never_read(), ES, "en", preserve=["links"])
+    with pytest.raises(TypeError, match="wrap it in a list"):
+        translator.translate("hola", ES, "en", preserve="url")
+    model = translator.model
+    assert isinstance(model, UpperModel)
+    assert model.batches == []
+
+
+def test_translator_find_literals() -> None:
+    translator = Translator(UpperModel(), keep=["Nike"])
+    text = "Nike costs 90 at acme.io"
+    assert [(s.kind, s.text) for s in translator.find_literals(text)] == [
+        (None, "Nike"),
+        (LiteralKind.NUMBER, "90"),
+        (LiteralKind.URL, "acme.io"),
+    ]
+    assert [s.text for s in translator.find_literals(text, ["url"])] == [
+        "Nike",
+        "acme.io",
+    ]
+    assert translator.find_literals(text, preserve=False) == []

@@ -136,6 +136,18 @@ def test_translate_keeps_terms_and_patterns(cache: Path) -> None:
     assert result.stdout.splitlines() == ["COMPRA Nike SKU-7:en"]
 
 
+@pytest.mark.usefixtures("fake_models")
+def test_translate_no_preserve_kind_sends_that_kind_to_the_model(cache: Path) -> None:
+    args = ("translate", *offline(cache), "--from", "es", "--to", "en")
+    text = "mira #ofertas en acme.io"
+    result = run(*args, "--no-preserve-kind", "hashtag", text)
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == ["MIRA #OFERTAS EN acme.io:en"]
+    result = run(*args, "--no-preserve-kind", "links", text)
+    assert result.exit_code == 2
+    assert "--no-preserve-kind" in result.stderr
+
+
 @pytest.mark.parametrize("option", [("--keep", " "), ("--keep-regex", "(")])
 def test_translate_rejects_bad_keep_options(
     cache: Path, option: tuple[str, str]

@@ -10,15 +10,18 @@ When a translation drops, repeats or alters a placeholder, the text is translate
 piece by piece instead: the prose between literals is translated on its own and the
 literals are kept between the pieces, so they are preserved whatever the model does.
 
-Callers can add their own literals (`Translator(keep=...)`): terms such as brand names,
-and regular expressions. Their matches are kept like the built-in ones; where matches
-overlap, the union of them is kept.
+Each literal has a `LiteralKind`, and callers choose which kinds to keep
+(`preserve=` on the translate methods). Callers can add their own literals
+(`Translator(keep=...)`): terms such as brand names, and regular expressions. Their matches
+are kept like the built-in ones; where matches overlap, the union of them is kept.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from enum import StrEnum
+from functools import cache
 from typing import TYPE_CHECKING
 
 from noentenc.translation.models.base import Translation, TranslationStatus
@@ -30,40 +33,121 @@ if TYPE_CHECKING:
 PLACEHOLDERS = "placeholders"
 SEGMENTS = "segments"
 
+
+class LiteralKind(StrEnum):
+    """A kind of text that translation keeps byte-for-byte."""
+
+    # Inline code in backticks.
+    CODE = "code"
+    # A Markdown link's target, with the brackets around it: `](https://…)`.
+    LINK_TARGET = "link_target"
+    # HTML/XML tags and character references.
+    TAG = "tag"
+    # Template placeholders: {{name}}, {name}, {0}, ${name}, %s, %(name)s.
+    PLACEHOLDER = "placeholder"
+    # URLs, and bare domains with a lowercase top-level label (acme.io/help).
+    URL = "url"
+    EMAIL = "email"
+    MENTION = "mention"
+    HASHTAG = "hashtag"
+    # Numbers, with decimal, thousands, time and date separators.
+    NUMBER = "number"
+
+
+# Every kind: what `preserve=True` keeps.
+ALL_KINDS: frozenset[LiteralKind] = frozenset(LiteralKind)
+
+
+@dataclass(frozen=True)
+class LiteralSpan:
+    """A literal found in a text: what it is and where.
+
+    `kind` is None for a match of the translator's `keep` terms. Where literals overlap
+    they are merged into one span, with the kind of the one that starts first.
+    """
+
+    kind: LiteralKind | None
+    start: int
+    end: int
+    text: str
+
+
+@dataclass(frozen=True)
+class _Pattern:
+    kind: LiteralKind
+    regex: str
+    # Drop sentence punctuation and unmatched closing brackets from the end.
+    trim: bool = False
+
+
 # One alternative per kind of literal, tried left to right at each position.
-_LITERAL = re.compile(
-    "|".join(
-        (
-            # Inline code, and a Markdown link's target with the brackets around it.
-            r"`[^`\n]+`",
-            r"\]\([^\s()]*(?:\([^\s()]*\)[^\s()]*)*\)",
-            # HTML/XML tags and character references.
-            r"</?[A-Za-z][\w:.-]*(?:\s+[^<>]*?)?/?>",
-            r"&(?:[A-Za-z][A-Za-z0-9]*|#\d+|#x[0-9A-Fa-f]+);",
-            # Template placeholders: {{name}}, {name}, {0}, ${name}, %s, %(name)s.
-            r"\{\{[^{}\n]*\}\}",
-            r"\$\{[^{}\n]*\}",
-            r"\{[A-Za-z_0-9][\w.:\-]*\}",
-            r"%\(\w+\)[sdifr]|%[sdif]",
-            # URLs, up to whitespace, quotes or angle brackets. Trailing punctuation and
-            # an unmatched closing bracket are trimmed afterwards.
-            r"(?P<url>(?:[A-Za-z][A-Za-z0-9+.-]*://|[Ww]{3}\.)[^\s<>\"'`]+)",
-            # Email addresses, mentions and hashtags.
-            r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+",
-            r"(?<![\w@])@\w+",
-            r"(?<![\w&#])#\w+",
-            # Bare domains need a lowercase top-level label: "acme.io", not "Mr.Smith".
-            r"(?P<domain>(?<![\w.@])[\w-]+(?:\.[\w-]+)*\.[a-z]{2,24}"
-            r"(?:/[^\s<>\"'`]*)?(?![\w@]))",
-            # Numbers, with decimal, thousands, time and date separators.
-            r"(?<![\w.,])\d+(?:[.,:/-]\d+)*(?!\w)",
-        )
-    )
+_PATTERNS: tuple[_Pattern, ...] = (
+    _Pattern(LiteralKind.CODE, r"`[^`\n]+`"),
+    _Pattern(LiteralKind.LINK_TARGET, r"\]\([^\s()]*(?:\([^\s()]*\)[^\s()]*)*\)"),
+    _Pattern(LiteralKind.TAG, r"</?[A-Za-z][\w:.-]*(?:\s+[^<>]*?)?/?>"),
+    _Pattern(LiteralKind.TAG, r"&(?:[A-Za-z][A-Za-z0-9]*|#\d+|#x[0-9A-Fa-f]+);"),
+    _Pattern(LiteralKind.PLACEHOLDER, r"\{\{[^{}\n]*\}\}"),
+    _Pattern(LiteralKind.PLACEHOLDER, r"\$\{[^{}\n]*\}"),
+    _Pattern(LiteralKind.PLACEHOLDER, r"\{[A-Za-z_0-9][\w.:\-]*\}"),
+    _Pattern(LiteralKind.PLACEHOLDER, r"%\(\w+\)[sdifr]|%[sdif]"),
+    # Up to whitespace, quotes or angle brackets.
+    _Pattern(
+        LiteralKind.URL,
+        r"(?:[A-Za-z][A-Za-z0-9+.-]*://|[Ww]{3}\.)[^\s<>\"'`]+",
+        trim=True,
+    ),
+    _Pattern(LiteralKind.EMAIL, r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"),
+    _Pattern(LiteralKind.MENTION, r"(?<![\w@])@\w+"),
+    _Pattern(LiteralKind.HASHTAG, r"(?<![\w&#])#\w+"),
+    # Bare domains need a lowercase top-level label: "acme.io", not "Mr.Smith".
+    _Pattern(
+        LiteralKind.URL,
+        r"(?<![\w.@])[\w-]+(?:\.[\w-]+)*\.[a-z]{2,24}(?:/[^\s<>\"'`]*)?(?![\w@])",
+        trim=True,
+    ),
+    _Pattern(LiteralKind.NUMBER, r"(?<![\w.,])\d+(?:[.,:/-]\d+)*(?!\w)"),
 )
 _TRAILING = ".,;:!?'\""
 _BRACKETS = {")": "(", "]": "[", "}": "{"}
 # Placeholder stems, tried in order; a stem the text already contains is skipped.
 _STEMS = ("ZXQ", "QZX")
+
+
+def check_kinds(
+    preserve: bool | Iterable[LiteralKind | str],
+) -> frozenset[LiteralKind] | None:
+    """The kinds `preserve` keeps: all for True, None (nothing, not even `keep`) for False."""
+    if preserve is True:
+        return ALL_KINDS
+    if preserve is False:
+        return None
+    if isinstance(preserve, str):
+        raise TypeError(
+            f"preserve takes True, False or a list of literal kinds, got {preserve!r}; "
+            "wrap it in a list"
+        )
+    kinds: set[LiteralKind] = set()
+    for kind in preserve:
+        try:
+            kinds.add(LiteralKind(kind))
+        except ValueError:
+            raise ValueError(
+                f"unknown literal kind {kind!r}; "
+                f"expected one of {sorted(str(k) for k in LiteralKind)}"
+            ) from None
+    return frozenset(kinds)
+
+
+@cache
+def _literal_regex(
+    kinds: frozenset[LiteralKind],
+) -> tuple[re.Pattern[str], tuple[_Pattern, ...]] | None:
+    """One regex trying the patterns of `kinds` in order, each in group `p<index>`."""
+    patterns = tuple(p for p in _PATTERNS if p.kind in kinds)
+    if not patterns:
+        return None
+    regex = "|".join(f"(?P<p{i}>{p.regex})" for i, p in enumerate(patterns))
+    return re.compile(regex), patterns
 
 
 def compile_keep(
@@ -142,34 +226,49 @@ class Masked:
 
 
 def find_literals(
-    text: str, keep: tuple[re.Pattern[str], ...] = ()
-) -> list[tuple[int, int]]:
-    """`(start, end)` of every literal in `text`, in order, with `keep`'s matches.
+    text: str,
+    keep: tuple[re.Pattern[str], ...] = (),
+    kinds: frozenset[LiteralKind] = ALL_KINDS,
+) -> list[LiteralSpan]:
+    """Every literal of `kinds` in `text`, and every match of `keep`, in order.
 
     Overlapping literals are merged into one.
     """
-    spans: list[tuple[int, int]] = []
-    for match in _LITERAL.finditer(text):
-        start, end = match.span()
-        if match.lastgroup in ("url", "domain"):
-            end = _trim(text, start, end)
-        spans.append((start, end))
-    if not keep:
-        return spans
-    for pattern in keep:
-        spans += [m.span() for m in pattern.finditer(text) if m.end() > m.start()]
-    merged: list[tuple[int, int]] = []
-    for start, end in sorted(spans):
+    spans: list[tuple[int, int, LiteralKind | None]] = []
+    compiled = _literal_regex(kinds)
+    if compiled is not None:
+        regex, patterns = compiled
+        for match in regex.finditer(text):
+            pattern = patterns[int(match.lastgroup[1:])]  # ty: ignore[not-subscriptable]
+            start, end = match.span()
+            if pattern.trim:
+                end = _trim(text, start, end)
+            spans.append((start, end, pattern.kind))
+    for keep_pattern in keep:
+        spans += [
+            (m.start(), m.end(), None)
+            for m in keep_pattern.finditer(text)
+            if m.end() > m.start()
+        ]
+    # A keep match at the same start as a built-in literal sorts after it.
+    spans.sort(key=lambda span: (span[0], span[2] is None))
+    merged: list[tuple[int, int, LiteralKind | None]] = []
+    for start, end, kind in spans:
         if merged and start < merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            first, last, first_kind = merged[-1]
+            merged[-1] = (first, max(last, end), first_kind)
         else:
-            merged.append((start, end))
-    return merged
+            merged.append((start, end, kind))
+    return [LiteralSpan(kind, a, b, text[a:b]) for a, b, kind in merged]
 
 
-def mask(text: str, keep: tuple[re.Pattern[str], ...] = ()) -> Masked | None:
+def mask(
+    text: str,
+    keep: tuple[re.Pattern[str], ...] = (),
+    kinds: frozenset[LiteralKind] = ALL_KINDS,
+) -> Masked | None:
     """`text` with its literals replaced, or None when it has none or no stem is free."""
-    spans = find_literals(text, keep)
+    spans = [(span.start, span.end) for span in find_literals(text, keep, kinds)]
     if not spans:
         return None
     stem = next((s for s in _STEMS if s.lower() not in text.lower()), None)
@@ -192,16 +291,18 @@ def mask(text: str, keep: tuple[re.Pattern[str], ...] = ()) -> Masked | None:
 
 
 def split_at_literals(
-    text: str, keep: tuple[re.Pattern[str], ...] = ()
+    text: str,
+    keep: tuple[re.Pattern[str], ...] = (),
+    kinds: frozenset[LiteralKind] = ALL_KINDS,
 ) -> list[tuple[str, bool]]:
     """`text` as `(piece, is_literal)` pieces, literals and the prose between them."""
     pieces: list[tuple[str, bool]] = []
     position = 0
-    for start, end in find_literals(text, keep):
-        if start > position:
-            pieces.append((text[position:start], False))
-        pieces.append((text[start:end], True))
-        position = end
+    for span in find_literals(text, keep, kinds):
+        if span.start > position:
+            pieces.append((text[position : span.start], False))
+        pieces.append((span.text, True))
+        position = span.end
     if position < len(text):
         pieces.append((text[position:], False))
     return pieces
@@ -226,18 +327,19 @@ def translate_preserving(
     texts: list[str],
     translate: Callable[[list[str]], list[Translation]],
     keep: tuple[re.Pattern[str], ...] = (),
+    kinds: frozenset[LiteralKind] = ALL_KINDS,
 ) -> list[Translation]:
-    """`translate(texts)`, with every literal in the texts, and `keep`'s matches, kept.
+    """`translate(texts)`, with the literals of `kinds`, and `keep`'s matches, kept.
 
     Texts are translated with placeholders first. Those whose placeholders don't come
     back intact, or that have no free placeholder stem, are translated piece by piece.
     """
-    masks = [mask(text, keep) for text in texts]
+    masks = [mask(text, keep, kinds) for text in texts]
     # Texts with literals but no free placeholder stem go straight to piecewise.
     piecewise = [
         i
         for i, (text, masked) in enumerate(zip(texts, masks, strict=True))
-        if masked is None and find_literals(text, keep)
+        if masked is None and find_literals(text, keep, kinds)
     ]
     skipped = set(piecewise)
     first = [i for i in range(len(texts)) if i not in skipped]
@@ -259,7 +361,7 @@ def translate_preserving(
             results[i] = replace(result, text=restored, preservation=PLACEHOLDERS)
     for i, result in zip(
         piecewise,
-        _translate_pieces([texts[i] for i in piecewise], translate, keep),
+        _translate_pieces([texts[i] for i in piecewise], translate, keep, kinds),
         strict=True,
     ):
         results[i] = result
@@ -274,11 +376,12 @@ def _translate_pieces(
     texts: list[str],
     translate: Callable[[list[str]], list[Translation]],
     keep: tuple[re.Pattern[str], ...],
+    kinds: frozenset[LiteralKind],
 ) -> list[Translation]:
     """Translate the prose between each text's literals, in one batch, and join it back."""
     if not texts:
         return []
-    split = [split_at_literals(text, keep) for text in texts]
+    split = [split_at_literals(text, keep, kinds) for text in texts]
     # (text, piece) of every piece to translate, with its surrounding whitespace removed.
     jobs = [
         (t, p)

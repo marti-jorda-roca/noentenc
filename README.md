@@ -144,7 +144,7 @@ translator.translate(
 # Without it (preserve=False), Opus-MT writes https://ejemplo.com/reset?id=42: another site.
 ```
 
-`Translator(keep=["Nike", re.compile(r"SKU-\d+")])` keeps your own terms and patterns the same way. See [Keep links and placeholders](docs/quickstart.md#keep-links-and-placeholders) for what is covered and its limits.
+`Translator(keep=["Nike", re.compile(r"SKU-\d+")])` keeps your own terms and patterns the same way. `preserve=` also takes a list of `LiteralKind`s to keep only some kinds: leaving out numbers lets the model make the words around them agree ("Mezclar 200 gramos de harina" rather than "Mezclar los gramos 200 de harina"). `translator.find_literals(text)` lists what a call would keep. See [Keep links and placeholders](docs/quickstart.md#keep-links-and-placeholders) for what is covered and its limits.
 
 For input too large to hold in memory, `translate_stream` takes any iterable of strings, such as a file's lines or a database cursor. It translates a chunk at a time and yields the results in input order; see [Stream large inputs](docs/quickstart.md#stream-large-inputs). `Translator(num_threads=2)` caps the CPU threads each model uses, for when several workers share a machine.
 
