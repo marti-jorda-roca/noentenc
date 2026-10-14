@@ -87,6 +87,20 @@ def test_quality_uses_fp32_nllb_with_measured_memory() -> None:
     assert model.download_bytes > 3_000_000_000
 
 
+def test_quality_uses_fp32_opus_mt_and_smaller_exports_under_a_limit() -> None:
+    (fp32,) = Translator("quality").plan(ES, EN).models
+    assert (fp32.name, fp32.precision) == ("OpusMTModel(Xenova/opus-mt-en-es)", "fp32")
+    assert fp32.memory_basis.startswith("measured")
+    (q4,) = Translator("quality", max_download_bytes=300 << 20).plan(ES, EN).models
+    assert q4.precision == "q4"
+    (int8,) = Translator("quality", max_download_bytes=200 << 20).plan(ES, EN).models
+    assert int8.precision == "int8"
+    assert int8.download_bytes < q4.download_bytes < fp32.download_bytes
+    # The other profiles keep q4.
+    for profile in ("speed", "balance"):
+        assert Translator(profile).plan(ES, EN).models[0].precision == "q4"
+
+
 def test_plans_agree_with_what_the_translator_loads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -171,7 +171,7 @@ Translator(Profile.BALANCE)  # Opus-MT where it exists, otherwise NLLB-200 at in
 
 On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 languages tested, and NLLB-200 adds up to 19 chrF++ on low-resource pairs such as English to Tamil. See [the profiles benchmark](docs/benchmarks.md#profiles) for the numbers behind each choice. The models behind a profile may change between releases, so pass a model explicitly when you need reproducible output.
 
-All three translation profiles use the same Opus-MT model for the 66 pairs it covers, and SMaLL-100 for texts without a source language. They only differ on the other pairs; see [routing](docs/benchmarks.md#routing).
+All three translation profiles use Opus-MT for the 66 pairs it covers, at q4 for `speed` and `balance` and at fp32 for `quality`, and SMaLL-100 for texts without a source language. fp32 scored highest on all 12 Opus-MT pairs tested, 0.4 chrF++ above q4 on average, for 425 MB instead of 287 MB. See [routing](docs/benchmarks.md#routing).
 
 ### Check before you download
 
@@ -277,7 +277,7 @@ Every translation model needs `noentenc[translation]`.
 
 | Model | Languages | Download (default precision) | Licence (weights) |
 |---|---|---|---|
-| `OpusMTModel.from_pair(src, tgt)` | 1 direction each, 66 available (`OPUS_MT_PAIRS`) | 287 MB (q4), 107 MB (int8) | CC-BY-4.0 or Apache-2.0, per pair |
+| `OpusMTModel.from_pair(src, tgt)` | 1 direction each, 66 available (`OPUS_MT_PAIRS`) | 287 MB (q4), 107 MB (int8), 425 MB (fp32) | CC-BY-4.0 or Apache-2.0, per pair |
 | `SMaLL100Model` | any source → 100 targets | 595 MB (int8) | MIT |
 | `M2M100Model` | 100 ↔ 100 | 603 MB (int8) | MIT |
 | `NLLBModel` | 196 ↔ 196 | 860 MB (int8) | CC-BY-NC-4.0, used by the `balance` and `quality` profiles |

@@ -361,13 +361,13 @@ Translator(Profile.BALANCE)
 | `balance` | fastText `openlid-v3`: 1.2 GB, 195 languages, GPL-3.0 | NLLB-200 600M at int8: 860 MB, 196 languages, CC-BY-NC-4.0 |
 | `quality` | fastText `glotlid`: 1.7 GB, 2102 languages | NLLB-200 600M at fp32: 3.5 GB, 196 languages, CC-BY-NC-4.0 |
 
-Every translation profile uses the dedicated Opus-MT model when the pair has one (66 directions). On those pairs it scored as well as NLLB-200 on average and is about 8× faster. Without a source language, Opus-MT and NLLB-200 can't be used, so every profile uses SMaLL-100.
+Every translation profile uses the dedicated Opus-MT model when the pair has one (66 directions). On those pairs it scored as well as NLLB-200 on average and is about 8× faster. `speed` and `balance` load it at q4 (287 MB) and `quality` at fp32 (425 MB), which scored higher on all 12 pairs tested. Without a source language, Opus-MT and NLLB-200 can't be used, so every profile uses SMaLL-100.
 
 `openlid-v3` and `glotlid` return individual languages: Swahili comes back as `swh`, and Congo Swahili as `swc`, where `lid176` says `swa`. To get one code per macrolanguage, pass the model yourself with `collapse_macrolanguages=True`.
 
 Check the licences before you use `balance` or `quality` commercially. NLLB-200 is non-commercial (CC-BY-NC-4.0) and warns when it loads, and `openlid-v3` is GPL-3.0. [Benchmarks](benchmarks.md#profiles) has the accuracy and speed of each choice, and [choose_profile.py](examples/choose_profile.py) runs all three profiles.
 
-The three profiles often pick the same translation model. Opus-MT pairs use Opus-MT in every profile, and texts without a source language use SMaLL-100 in every profile. So `quality` only changes the output of other pairs. [Routing](benchmarks.md#routing) has the full table.
+The three profiles often pick the same translation model. Opus-MT pairs use Opus-MT in every profile, at fp32 in `quality`, and texts without a source language use SMaLL-100 in every profile. So `speed` and `balance` give the same output on Opus-MT pairs, and `quality` a slightly better one. [Routing](benchmarks.md#routing) has the full table.
 
 #### Plan, and set limits
 
@@ -385,7 +385,7 @@ plan.missing_bytes  # what still has to download
 
 `memory_bytes` is resident memory once loaded. `memory_basis` says whether that was measured (see [Memory](benchmarks.md#memory)) or estimated. `Translator(...).plan(target, source)` does the same for one pair, and `LanguageDetector(...).plan()` for a detector. A translator given a model describes that model, already loaded, with its precision, licence and size on disk: `Translator(OpusMTModel.from_pair("en", "es", precision="fp32")).plan("es", "en")`. A model's `repr` names it too, `OpusMTModel(model='Xenova/opus-mt-en-es', precision='fp32')`. `Translator.supports(target, source)` and `Translator.supported_languages()` say which pairs a profile covers.
 
-To keep a profile within your licence policy or download budget, pass `allowed_licenses` (SPDX identifiers) and `max_download_bytes`. A profile then skips a model that breaks them for its next choice. NLLB-200 gives way to SMaLL-100, and Opus-MT q4 gives way to the smaller Opus-MT int8. If nothing is left, the call raises `ModelConstraintError` before downloading.
+To keep a profile within your licence policy or download budget, pass `allowed_licenses` (SPDX identifiers) and `max_download_bytes`. A profile then skips a model that breaks them for its next choice. NLLB-200 gives way to SMaLL-100, and Opus-MT gives way to its smaller exports: fp32 to q4, and q4 to int8. If nothing is left, the call raises `ModelConstraintError` before downloading.
 
 ```python
 from noentenc.translation import Translator

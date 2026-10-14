@@ -100,8 +100,8 @@ class Translator:
     `model` is a model, or a `Profile` that picks one per language pair (`None` is
     `"speed"`). Models are loaded lazily on first use and then reused.
 
-    Every profile uses a direct Opus-MT model when one exists for the pair. For the
-    other pairs:
+    Every profile uses a direct Opus-MT model when one exists for the pair: at q4, and
+    at fp32 for `quality` (the most accurate export, 425 MB). For the other pairs:
 
     - `speed`: SMaLL-100 (int8, 595 MB).
     - `balance`: NLLB-200 600M (int8, 860 MB), about 7x slower than SMaLL-100.

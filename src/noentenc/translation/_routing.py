@@ -109,14 +109,26 @@ def _opus_mt(source: Language | None, target: Language) -> ModelChoice | None:
     return ModelChoice(OpusMTModel, *pair_repo(source, target))
 
 
+def _opus_mt_fp32(source: Language | None, target: Language) -> ModelChoice | None:
+    # The most accurate Opus-MT export: ahead of q4 on all 12 FLORES-200 pairs tested
+    # (0.4 chrF++ on average), and as fast in batches, for 1.5x the download.
+    return _opus_mt_precision(source, target, Precision.FP32)
+
+
 def _opus_mt_int8(source: Language | None, target: Language) -> ModelChoice | None:
     # Only reached when constraints reject the default q4 export: int8 scores the same
     # on FLORES-200 and downloads 2.7x less, but is slower one sentence at a time.
+    return _opus_mt_precision(source, target, Precision.INT8)
+
+
+def _opus_mt_precision(
+    source: Language | None, target: Language, precision: Precision
+) -> ModelChoice | None:
     choice = _opus_mt(source, target)
     return (
         None
         if choice is None
-        else ModelChoice(OpusMTModel, choice.repo, choice.revision, Precision.INT8)
+        else ModelChoice(OpusMTModel, choice.repo, choice.revision, precision)
     )
 
 
@@ -146,11 +158,12 @@ def _multilingual(
 
 # Models tried in order for each profile; the first that translates the pair is used.
 # Where Opus-MT has a model it scores as well as NLLB-200 on average and is ~8x faster
-# (FLORES-200 chrF++, docs/benchmarks.md), so every profile tries it first.
+# (FLORES-200 chrF++, docs/benchmarks.md), so every profile tries it first: at q4, and
+# at fp32 for `quality`, falling back to the smaller exports under a download limit.
 CANDIDATES: dict[Profile, tuple[_Candidate, ...]] = {
     Profile.SPEED: (_opus_mt, _opus_mt_int8, _small100),
     Profile.BALANCE: (_opus_mt, _opus_mt_int8, _nllb_int8, _small100),
-    Profile.QUALITY: (_opus_mt, _opus_mt_int8, _nllb_fp32, _small100),
+    Profile.QUALITY: (_opus_mt_fp32, _opus_mt, _opus_mt_int8, _nllb_fp32, _small100),
 }
 
 
