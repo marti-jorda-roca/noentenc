@@ -2,6 +2,8 @@
 
 noentenc detects languages and translates text in Python, on CPU, without torch. This folder holds the guides, the benchmarks and runnable examples. The [project README](../README.md) is the short tour; start there if you haven't seen the library before.
 
+These pages follow the `main` branch, which can be ahead of the latest release on PyPI. For the version you have installed (`noentenc info` prints it), read the docs at its tag, `https://github.com/marti-jorda-roca/noentenc/tree/v<version>/docs`.
+
 ## Start here
 
 1. Install the package with translation support, with pip or uv. It needs Python 3.11 or newer.
