@@ -238,8 +238,14 @@ def test_explicit_models_answer_from_their_schema() -> None:
     translator = Translator(UpperModel())
     assert translator.supports(ES, EN)
     assert translator.supported_languages() == UpperModel.schema
-    with pytest.raises(ValueError, match="profile models"):
-        translator.plan(ES)
+    # A given model describes itself; only its name is known for a custom one.
+    (model,) = translator.plan(ES).models
+    assert model.name == "UpperModel(upper)"
+    assert (model.license, model.precision, model.cached) == ("unknown", None, True)
+    # With "auto", the profile's detector comes first.
+    detector, model = translator.plan(ES, "auto").models
+    assert detector.task == "detection"
+    assert model.name == "UpperModel(upper)"
     with pytest.raises(ValueError, match="a profile loads"):
         Translator(UpperModel(), allowed_licenses=OPEN)
 

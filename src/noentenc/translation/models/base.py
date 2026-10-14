@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from noentenc._plan import ModelPlan
 from noentenc.languages import Language, LanguageSchema
 
 
@@ -63,6 +64,26 @@ class BaseModel(ABC):
     def __init__(self, model: str | Path, only_local_files: bool = False) -> None:
         self.model = model
         self.only_local_files = only_local_files
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(model={str(self.model)!r})"
+
+    def plan(self) -> ModelPlan:
+        """What this loaded model is and costs, as `Translator.plan()` reports it.
+
+        This default knows only the model's name; built-in models override it with
+        their precision, licence, size and memory.
+        """
+        return ModelPlan(
+            task="translation",
+            name=f"{type(self).__name__}({getattr(self, 'model', '')})",
+            precision=None,
+            license="unknown",
+            download_bytes=0,
+            memory_bytes=0,
+            memory_basis="unknown",
+            cached=True,
+        )
 
     def predict(
         self,

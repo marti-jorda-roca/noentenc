@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING, ClassVar
 
 from noentenc._batching import check_batch_size
 from noentenc._cache import translation_cache
+from noentenc._catalog import OPUS_MT_LICENSES
 from noentenc._onnx import pad
 from noentenc._optional import TRANSLATION_EXTRA, require
+from noentenc._plan import ModelPlan, translation_memory
 from noentenc.languages import Language
 from noentenc.translation._segment import split_sentences, split_to_fit
 from noentenc.translation.models._engine import (
@@ -110,6 +112,7 @@ class Seq2SeqModel(BaseModel):
             revision=revision,
             cache_dir=translation_cache(cache_dir),
         )
+        self._files = files
         self.config = json.loads(files["config.json"].read_text())
         self.tokenizer = self._load_tokenizer(files)
         self.max_length: int = self.config["max_position_embeddings"]
@@ -125,6 +128,31 @@ class Seq2SeqModel(BaseModel):
             files[decoder],
             DecoderShape.from_config(self.config),
             num_threads,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(model={str(self.model)!r}, "
+            f"precision={str(self.precision)!r})"
+        )
+
+    def plan(self) -> ModelPlan:
+        """This model's precision, licence, files on disk and memory; it's loaded."""
+        download = sum(path.stat().st_size for path in self._files.values())
+        memory, basis = translation_memory(
+            type(self).__name__, str(self.precision), download
+        )
+        licence = OPUS_MT_LICENSES.get(str(self.model)) or self.weights_license
+        return ModelPlan(
+            task="translation",
+            name=f"{type(self).__name__}({self.model})",
+            precision=str(self.precision),
+            license=licence or "unknown",
+            download_bytes=download,
+            memory_bytes=memory,
+            memory_basis=basis,
+            cached=True,
+            files=tuple(self._files),
         )
 
     @classmethod

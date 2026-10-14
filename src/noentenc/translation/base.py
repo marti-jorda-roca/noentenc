@@ -233,17 +233,22 @@ class Translator:
 
         Loads and downloads nothing. With `source_language="auto"` the plan holds the
         detector and every model a detected language could be routed to. Raises like
-        `translate` when no allowed model translates the pair.
+        `translate` when no allowed model translates the pair. A translator given a
+        `model` describes that model (its `plan()`), already loaded.
         """
         from noentenc.language_detection.base import check_profile_plan
 
-        if self.model is not None:
-            raise ValueError(
-                "plan() describes profile models; this translator was given one"
-            )
         target, source, auto = _check_arguments(
             target_language, source_language, 32, "raise"
         )
+        if self.model is not None:
+            if not auto:
+                self.model.schema.validate(source, target, type(self.model).__name__)
+                return Plan((self.model.plan(),))
+            detector = check_profile_plan(
+                self.profile, self.constraints, self.cache_dir
+            )
+            return Plan((detector, self.model.plan()))
         if not auto:
             choice = _routing.choose(self.profile, source, target, self.constraints)
             return Plan((choice.plan(self.cache_dir),))

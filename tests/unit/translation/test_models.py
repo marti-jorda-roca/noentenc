@@ -10,6 +10,7 @@ from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import WhitespaceSplit
 
 from noentenc.languages import Language, UnsupportedLanguageError
+from noentenc.translation import Translator
 from noentenc.translation.models import _seq2seq
 from noentenc.translation.models._engine import GenerationConfig
 from noentenc.translation.models._hub import resolve_files
@@ -449,3 +450,30 @@ def test_split_long_keeps_the_first_output_when_halves_also_run_away(
     )
     assert result.output_limit_reached
     assert not result.input_split
+
+
+def test_models_have_a_readable_repr(m2m_dir: Path) -> None:
+    model = SMaLL100Model(m2m_dir)
+    assert repr(model) == f"SMaLL100Model(model='{m2m_dir}', precision='int8')"
+
+
+def test_a_loaded_model_plans_itself(m2m_dir: Path, opus_dir: Path) -> None:
+    model = SMaLL100Model(m2m_dir)
+    plan = model.plan()
+    files = SMaLL100Model.filenames()
+    assert plan.name == f"SMaLL100Model({m2m_dir})"
+    assert (plan.precision, plan.license, plan.cached) == ("int8", "MIT", True)
+    assert plan.files == tuple(files)
+    assert plan.download_bytes == sum((m2m_dir / name).stat().st_size for name in files)
+    assert plan.memory_basis.startswith("measured")
+    # Opus-MT's licence is per pair; an unknown repo has none.
+    assert OpusMTModel(opus_dir).plan().license == "unknown"
+
+
+def test_translator_plans_its_given_model(opus_dir: Path) -> None:
+    translator = Translator(OpusMTModel(opus_dir))
+    (plan,) = translator.plan(ZH, EN).models
+    assert plan.name == f"OpusMTModel({opus_dir})"
+    assert plan.precision == "q4"
+    with pytest.raises(UnsupportedLanguageError):
+        translator.plan(EN, ES)

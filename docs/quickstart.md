@@ -383,7 +383,7 @@ plan = noentenc.plan("balance", translation=[("ja", "ca")])
 plan.missing_bytes  # what still has to download
 ```
 
-`memory_bytes` is resident memory once loaded. `memory_basis` says whether that was measured (see [Memory](benchmarks.md#memory)) or estimated. `Translator(...).plan(target, source)` does the same for one pair, and `LanguageDetector(...).plan()` for a detector. `Translator.supports(target, source)` and `Translator.supported_languages()` say which pairs a profile covers.
+`memory_bytes` is resident memory once loaded. `memory_basis` says whether that was measured (see [Memory](benchmarks.md#memory)) or estimated. `Translator(...).plan(target, source)` does the same for one pair, and `LanguageDetector(...).plan()` for a detector. A translator given a model describes that model, already loaded, with its precision, licence and size on disk: `Translator(OpusMTModel.from_pair("en", "es", precision="fp32")).plan("es", "en")`. A model's `repr` names it too, `OpusMTModel(model='Xenova/opus-mt-en-es', precision='fp32')`. `Translator.supports(target, source)` and `Translator.supported_languages()` say which pairs a profile covers.
 
 To keep a profile within your licence policy or download budget, pass `allowed_licenses` (SPDX identifiers) and `max_download_bytes`. A profile then skips a model that breaks them for its next choice. NLLB-200 gives way to SMaLL-100, and Opus-MT q4 gives way to the smaller Opus-MT int8. If nothing is left, the call raises `ModelConstraintError` before downloading.
 
