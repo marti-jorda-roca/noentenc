@@ -448,7 +448,8 @@ Translator(SMaLL100Model())
 # low-resource languages, and about 4x slower. It needs the source language.
 Translator(M2M100Model())
 
-# Pick a precision explicitly: fp32, int8 or q4, where the export has it.
+# Pick a precision explicitly: fp32, int8 or q4, where the export has it. For Opus-MT,
+# fp32 scored highest on all 12 pairs tested (docs/benchmarks.md#opus-mt-precision).
 Translator(
     OpusMTModel.from_pair(Language.ENGLISH, Language.GERMAN, precision=Precision.FP32)
 )
