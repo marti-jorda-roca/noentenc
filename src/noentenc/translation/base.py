@@ -144,8 +144,10 @@ class Translator:
     what a profile would do without loading or downloading a model.
 
     Literal text is kept: URLs, email addresses, mentions, hashtags, numbers, inline
-    code, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags and Markdown
-    link targets are swapped for placeholders the models copy through, then put back. If
+    code, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags, Markdown
+    link targets, file paths, code identifiers (`getUserName`, `user_id`), and hashes,
+    UUIDs and base64 are swapped for placeholders the models copy through, then put
+    back. Fenced code blocks never reach the model. If
     a translation loses a placeholder, the prose around the literals is translated piece
     by piece instead, so literals always survive. `preserve=False` turns this off, and a
     list of `LiteralKind`s keeps only those kinds (and the `keep` terms): leaving out
@@ -379,8 +381,9 @@ class Translator:
         Blank text, and text whose `source_language` is `target_language`, come back
         unchanged without loading a model. `source_language="auto"` detects it.
 
-        URLs, email addresses, mentions, hashtags, numbers, inline code, template
-        placeholders, HTML tags and the translator's `keep` terms come back byte-for-byte
+        URLs, email addresses, mentions, hashtags, numbers, code (inline and fenced
+        blocks), template placeholders, HTML tags, file paths, code identifiers, hashes
+        and base64, and the translator's `keep` terms come back byte-for-byte
         (see `Translation.preservation`); `preserve=False` sends the text to the model
         as it is, and a list of `LiteralKind`s keeps only those kinds and `keep`'s terms.
         """

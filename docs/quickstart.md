@@ -186,6 +186,10 @@ Machine translation models translate everything they see, including the parts th
 - `email`, `mention` and `hashtag`: email addresses, `@mentions` and `#hashtags`.
 - `number`: numbers, including decimals, thousands separators, times and dates (`1,299.99`, `14:30`, `12/05/2026`).
 - `code`: inline code in backticks.
+- `code_block`: fenced Markdown code blocks, from a line opening with ```` ``` ```` or `~~~` to the matching fence, or to the end of the text when it's never closed. They never reach the model: the prose before and after each block is translated on its own.
+- `path`: file paths, `/etc/app/config.yaml`, `~/notes.txt`, `./run.sh` and `C:\Users\ana\a.txt`. An absolute path needs two segments, so `and/or` and `/s` aren't paths.
+- `identifier`: code identifiers, `user_id` and camelCase or PascalCase names with two or more humps (`getUserName`). Names with one hump, such as `iPhone` or `JavaScript`, are translated as words.
+- `encoded`: hashes, keys, UUIDs and base64, 16 or more characters that mix letters and digits.
 - `placeholder`: template placeholders, `{name}`, `{0}`, `{{name}}`, `${name}`, `%s`, `%d` and `%(name)s`.
 - `tag`: HTML and XML tags and character references (`<a href="…">`, `</b>`, `&amp;`).
 - `link_target`: Markdown link targets, `](https://…)`. The link text is translated.
@@ -245,7 +249,7 @@ It takes the same `preserve` argument. A match of a `keep` term has `kind=None`,
 
 Limits:
 
-- Only the literals above are protected. Markdown emphasis (`**bold**`), lists and headings, and the text inside HTML tags, are translated like any other text, and a model may move or drop the markup around them.
+- Only the literals above are protected. Markdown emphasis (`**bold**`), lists and headings, indented code blocks, and the text inside HTML tags, are translated like any other text, and a model may move or drop the markup around them.
 - Words can move across tags. German Opus-MT turns `Click <a>here</a> to…` into `Klicken Sie hier <a></a>, um…`. The tags are intact, but the link now wraps nothing.
 - Protected numbers keep their source format: `1,299.99` stays `1,299.99` in Spanish rather than becoming the locale's `1.299,99`. Without preservation it's no better: Opus-MT writes `1,299,99` or `1.299.99`, neither of which is correct. Leaving `number` out of `preserve` trades this for sentences that agree with their numbers, as shown above.
 - This isn't a document translator. Long HTML or Markdown documents work best when you translate their text nodes yourself.

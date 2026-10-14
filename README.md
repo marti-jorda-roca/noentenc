@@ -134,7 +134,7 @@ Text of any length works. It is split into sentences, they are translated in one
 
 `Translator` keeps the models it loads for later calls, at most two at a time by default. A loaded model needs a lot more RAM than its download: about 1.1 GB for an Opus-MT pair at q4 and 1.15 GB for SMaLL-100. Pass `max_loaded_models=` to change the limit (`None` for no limit), and call `translator.unload()` to free them all. See [memory](docs/benchmarks.md#memory).
 
-Links, emails and placeholders survive. URLs, email addresses, mentions, hashtags, numbers, inline code, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags and Markdown link targets come back byte-for-byte while the prose around them is translated:
+Links, emails, code and placeholders survive. URLs, email addresses, mentions, hashtags, numbers, inline code and fenced code blocks, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags, Markdown link targets, file paths, code identifiers (`getUserName`, `user_id`), and hashes, UUIDs and base64 come back byte-for-byte while the prose around them is translated:
 
 ```python
 translator.translate(

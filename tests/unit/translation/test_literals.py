@@ -416,3 +416,101 @@ def test_translator_find_literals() -> None:
         "acme.io",
     ]
     assert translator.find_literals(text, preserve=False) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "Fix:\n```python\nprint('hi')\n```\nThanks",
+            [(LiteralKind.CODE_BLOCK, "```python\nprint('hi')\n```")],
+        ),
+        # Never closed: the block runs to the end of the text.
+        ("Run:\n~~~\nmake all", [(LiteralKind.CODE_BLOCK, "~~~\nmake all")]),
+        # A fence must open a line; mid-line backticks stay inline code.
+        ("Inline ```x``` here", [(LiteralKind.CODE, "`x`")]),
+        (
+            "Edit /etc/app/config.yaml, ~/notes.txt, ./run.sh or C:\\Users\\ana\\a.txt.",
+            [
+                (LiteralKind.PATH, "/etc/app/config.yaml"),
+                (LiteralKind.PATH, "~/notes.txt"),
+                (LiteralKind.PATH, "./run.sh"),
+                (LiteralKind.PATH, "C:\\Users\\ana\\a.txt"),
+            ],
+        ),
+        # Not paths: words around a slash, one-segment absolute paths.
+        ("and/or km/h TCP/IP /s", []),
+        (
+            "Call getUserName with user_id on x86_64",
+            [
+                (LiteralKind.IDENTIFIER, "getUserName"),
+                (LiteralKind.IDENTIFIER, "user_id"),
+                (LiteralKind.IDENTIFIER, "x86_64"),
+            ],
+        ),
+        # Not identifiers: names with one hump, Markdown emphasis.
+        ("iPhone JavaScript PhD McDonald __bold__ _it_", []),
+        (
+            "sha 964670f15c6b47f9b8f9340732720473 id "
+            "964670f1-5c6b-47f9-b8f9-340732720473 b64 aGVsbG8gd29ybGQgaG93",
+            [
+                (LiteralKind.ENCODED, "964670f15c6b47f9b8f9340732720473"),
+                (LiteralKind.ENCODED, "964670f1-5c6b-47f9-b8f9-340732720473"),
+                (LiteralKind.ENCODED, "aGVsbG8gd29ybGQgaG93"),
+            ],
+        ),
+        # Not encoded: long words without digits, hyphenated words with a number.
+        ("antidisestablishmentarianism COVID-19-related", [(LiteralKind.NUMBER, "19")]),
+    ],
+)
+def test_find_code_paths_identifiers_and_encoded(
+    text: str, expected: list[tuple[LiteralKind, str]]
+) -> None:
+    assert [(span.kind, span.text) for span in find_literals(text)] == expected
+
+
+BLOCK_TEXT = "fix it:\n\n```\nprint(x)  # all names\n```\n\nthen run it."
+
+
+def test_code_blocks_never_reach_the_model() -> None:
+    seen: list[str] = []
+
+    def record(texts: list[str]) -> list[Translation]:
+        seen.extend(texts)
+        return upper(texts)
+
+    (result,) = translate_preserving([BLOCK_TEXT], record)
+    assert result.text == "FIX IT:\n\n```\nprint(x)  # all names\n```\n\nTHEN RUN IT."
+    assert result.preservation == "segments"
+    assert seen == ["fix it:", "then run it."]
+
+
+def test_code_blocks_mixed_with_other_literals_and_plain_texts() -> None:
+    texts = [BLOCK_TEXT + " see https://a.io", "plain text", "```\nonly code\n```"]
+    results = translate_preserving(texts, upper)
+    assert [r.text for r in results] == [
+        "FIX IT:\n\n```\nprint(x)  # all names\n```\n\nTHEN RUN IT. SEE https://a.io",
+        "PLAIN TEXT",
+        "```\nonly code\n```",
+    ]
+    assert [r.preservation for r in results] == ["segments", None, "segments"]
+
+
+def test_code_blocks_go_to_the_model_when_not_preserved() -> None:
+    kinds = frozenset(LiteralKind) - {LiteralKind.CODE_BLOCK}
+    (result,) = translate_preserving([BLOCK_TEXT], upper, kinds=kinds)
+    assert result.text == BLOCK_TEXT.upper()
+
+
+def test_a_failed_prose_piece_fails_the_text_with_code_blocks() -> None:
+    def fails_on_run(texts: list[str]) -> list[Translation]:
+        return [
+            Translation(t, status=TranslationStatus.FAILED, error="ValueError: boom")
+            if "run" in t
+            else Translation(t.upper())
+            for t in texts
+        ]
+
+    (result,) = translate_preserving([BLOCK_TEXT], fails_on_run)
+    assert result.status is TranslationStatus.FAILED
+    assert result.text == BLOCK_TEXT

@@ -1,4 +1,4 @@
-"""Keep URLs, emails, code, placeholders, tags and numbers byte-for-byte through translation.
+"""Keep URLs, emails, code, paths, placeholders, tags and numbers byte-for-byte in translation.
 
 Each literal is swapped for a placeholder (`ZXQ0`, `ZXQ1`...) that the models copy through,
 the text is translated, and the placeholders are swapped back. Placeholders were chosen by
@@ -9,6 +9,8 @@ in 100% of Opus-MT and SMaLL-100 outputs, and 93% of NLLB-200 and M2M100 ones, m
 When a translation drops, repeats or alters a placeholder, the text is translated again
 piece by piece instead: the prose between literals is translated on its own and the
 literals are kept between the pieces, so they are preserved whatever the model does.
+Fenced code blocks always go that way: a block alone on its lines would leave the model a
+sentence that is nothing but a placeholder.
 
 Each literal has a `LiteralKind`, and callers choose which kinds to keep
 (`preserve=` on the translate methods). Callers can add their own literals
@@ -37,6 +39,9 @@ SEGMENTS = "segments"
 class LiteralKind(StrEnum):
     """A kind of text that translation keeps byte-for-byte."""
 
+    # Fenced Markdown code blocks (``` or ~~~). They never reach the model: the prose
+    # around them is translated on its own.
+    CODE_BLOCK = "code_block"
     # Inline code in backticks.
     CODE = "code"
     # A Markdown link's target, with the brackets around it: `](https://…)`.
@@ -50,6 +55,13 @@ class LiteralKind(StrEnum):
     EMAIL = "email"
     MENTION = "mention"
     HASHTAG = "hashtag"
+    # File paths: /usr/local/bin, ~/notes.txt, ./run.sh, C:\Users\ana.
+    PATH = "path"
+    # Hashes, keys, UUIDs and base64: 16+ characters mixing letters and digits.
+    ENCODED = "encoded"
+    # Code identifiers: snake_case, and camelCase or PascalCase with two or more humps
+    # (getUserName, but not iPhone or JavaScript).
+    IDENTIFIER = "identifier"
     # Numbers, with decimal, thousands, time and date separators.
     NUMBER = "number"
 
@@ -82,6 +94,13 @@ class _Pattern:
 
 # One alternative per kind of literal, tried left to right at each position.
 _PATTERNS: tuple[_Pattern, ...] = (
+    # An opening fence at the start of a line, up to the same fence on a line of its own,
+    # or the end of the text when it's never closed.
+    _Pattern(
+        LiteralKind.CODE_BLOCK,
+        r"(?ms:^[ \t]{0,3}(?P<fence>`{3,}|~{3,})[^\n]*$.*?"
+        r"(?:^[ \t]{0,3}(?P=fence)[ \t]*$|\Z))",
+    ),
     _Pattern(LiteralKind.CODE, r"`[^`\n]+`"),
     _Pattern(LiteralKind.LINK_TARGET, r"\]\([^\s()]*(?:\([^\s()]*\)[^\s()]*)*\)"),
     _Pattern(LiteralKind.TAG, r"</?[A-Za-z][\w:.-]*(?:\s+[^<>]*?)?/?>"),
@@ -105,8 +124,30 @@ _PATTERNS: tuple[_Pattern, ...] = (
         r"(?<![\w.@])[\w-]+(?:\.[\w-]+)*\.[a-z]{2,24}(?:/[^\s<>\"'`]*)?(?![\w@])",
         trim=True,
     ),
+    # Absolute paths need two segments, so "/s" or "and/or" aren't paths.
+    _Pattern(
+        LiteralKind.PATH,
+        r"(?<![\w/.~\\-])(?:(?:~|\.\.?)(?:/[\w.@+-]+)+|(?:/[\w.@+-]+){2,})/?"
+        r"|(?<![\w\\])[A-Za-z]:\\(?:[\w.@+-]+\\)*[\w.@+-]*",
+        trim=True,
+    ),
+    _Pattern(
+        LiteralKind.ENCODED,
+        r"(?<![\w+/=-])(?:"
+        r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"
+        r"|(?=[A-Za-z0-9+/]*\d)(?=[A-Za-z0-9+/]*[A-Za-z])[A-Za-z0-9+/]{16,}={0,2}"
+        r")(?![\w+/=-])",
+    ),
+    _Pattern(
+        LiteralKind.IDENTIFIER,
+        r"(?<![\w$])(?:"
+        r"[A-Za-z0-9]*[a-z0-9][A-Z][A-Za-z0-9]*[a-z0-9][A-Z][A-Za-z0-9]*"
+        r"|_*[A-Za-z0-9]+(?:_+[A-Za-z0-9]+)+_*"
+        r")(?![\w$])",
+    ),
     _Pattern(LiteralKind.NUMBER, r"(?<![\w.,])\d+(?:[.,:/-]\d+)*(?!\w)"),
 )
+_CODE_BLOCKS = frozenset({LiteralKind.CODE_BLOCK})
 _TRAILING = ".,;:!?'\""
 _BRACKETS = {")": "(", "]": "[", "}": "{"}
 # Placeholder stems, tried in order; a stem the text already contains is skipped.
@@ -331,9 +372,50 @@ def translate_preserving(
 ) -> list[Translation]:
     """`translate(texts)`, with the literals of `kinds`, and `keep`'s matches, kept.
 
-    Texts are translated with placeholders first. Those whose placeholders don't come
-    back intact, or that have no free placeholder stem, are translated piece by piece.
+    Fenced code blocks are cut out first, and the prose between them is translated on
+    its own. Texts are translated with placeholders next. Those whose placeholders don't
+    come back intact, or that have no free placeholder stem, are translated piece by
+    piece.
     """
+    if LiteralKind.CODE_BLOCK not in kinds:
+        return _translate_masked(texts, translate, keep, kinds)
+    inner = kinds - _CODE_BLOCKS
+    blocks = [
+        i for i, text in enumerate(texts) if find_literals(text, (), _CODE_BLOCKS)
+    ]
+    if not blocks:
+        return _translate_masked(texts, translate, keep, inner)
+    with_blocks = set(blocks)
+    plain = [i for i in range(len(texts)) if i not in with_blocks]
+    results: list[Translation | None] = [None] * len(texts)
+    for i, result in zip(
+        plain,
+        _translate_masked([texts[i] for i in plain], translate, keep, inner),
+        strict=True,
+    ):
+        results[i] = result
+    for i, result in zip(
+        blocks,
+        _translate_pieces(
+            [texts[i] for i in blocks],
+            lambda prose: _translate_masked(prose, translate, keep, inner),
+            lambda text: split_at_literals(text, (), _CODE_BLOCKS),
+        ),
+        strict=True,
+    ):
+        results[i] = result
+    return results  # ty: ignore[invalid-return-type] - every slot is filled above
+
+
+def _translate_masked(
+    texts: list[str],
+    translate: Callable[[list[str]], list[Translation]],
+    keep: tuple[re.Pattern[str], ...],
+    kinds: frozenset[LiteralKind],
+) -> list[Translation]:
+    """`translate_preserving` once code blocks are out of the way."""
+    if not texts:
+        return []
     masks = [mask(text, keep, kinds) for text in texts]
     # Texts with literals but no free placeholder stem go straight to piecewise.
     piecewise = [
@@ -361,7 +443,11 @@ def translate_preserving(
             results[i] = replace(result, text=restored, preservation=PLACEHOLDERS)
     for i, result in zip(
         piecewise,
-        _translate_pieces([texts[i] for i in piecewise], translate, keep, kinds),
+        _translate_pieces(
+            [texts[i] for i in piecewise],
+            translate,
+            lambda text: split_at_literals(text, keep, kinds),
+        ),
         strict=True,
     ):
         results[i] = result
@@ -375,13 +461,15 @@ def _model_input(text: str, masked: Masked | None) -> str:
 def _translate_pieces(
     texts: list[str],
     translate: Callable[[list[str]], list[Translation]],
-    keep: tuple[re.Pattern[str], ...],
-    kinds: frozenset[LiteralKind],
+    split_text: Callable[[str], list[tuple[str, bool]]],
 ) -> list[Translation]:
-    """Translate the prose between each text's literals, in one batch, and join it back."""
+    """Translate the prose between each text's literals, in one batch, and join it back.
+
+    `split_text` cuts a text into `(piece, is_literal)` pieces.
+    """
     if not texts:
         return []
-    split = [split_at_literals(text, keep, kinds) for text in texts]
+    split = [split_text(text) for text in texts]
     # (text, piece) of every piece to translate, with its surrounding whitespace removed.
     jobs = [
         (t, p)

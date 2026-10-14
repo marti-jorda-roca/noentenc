@@ -51,6 +51,23 @@ print(
 )
 # Su Apple Watch (SKU-4821) llega mañana.
 
+# Code blocks never reach the model, and paths and identifiers are kept too.
+print(
+    translator.translate(
+        "Open ~/app/settings.py and set debug_mode:\n\n```\ndebug_mode = True\n```\n\n"
+        "Then restart the server.",
+        Language.SPANISH,
+        Language.ENGLISH,
+    )
+)
+# Abra ~/app/settings.py y establezca debug_mode:
+#
+# ```
+# debug_mode = True
+# ```
+#
+# A continuación, reinicie el servidor.
+
 # Keep only some kinds. A masked number can't agree with the words around it, so
 # leaving numbers to the model reads better, at the cost of their format.
 no_numbers = set(LiteralKind) - {LiteralKind.NUMBER}

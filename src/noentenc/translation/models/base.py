@@ -48,8 +48,8 @@ class Translation:
     model: str | None = None
     # How URLs, emails, code, placeholders, tags and numbers were kept unchanged:
     # "placeholders" (swapped out and back), "segments" (the prose between them was
-    # translated piece by piece, because placeholders didn't survive), or None when the
-    # text had none or `preserve=False`.
+    # translated piece by piece, because the text had a fenced code block or placeholders
+    # didn't survive), or None when the text had none or `preserve=False`.
     preservation: str | None = None
 
 
