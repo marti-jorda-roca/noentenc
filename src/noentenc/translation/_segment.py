@@ -1,4 +1,5 @@
 import re
+from bisect import bisect_left
 from dataclasses import dataclass
 from itertools import pairwise
 
@@ -6,6 +7,9 @@ from itertools import pairwise
 _SENTENCE_END = frozenset(".!?…。！？।؟۔")
 _CLOSERS = frozenset("\"'”’»)]）」』")
 _FULL_WIDTH_END = frozenset("。！？”’）」』")
+# Punctuation that ends a clause, where a sentence too long for a model is best cut.
+_CLAUSE_END = re.compile(r"[,;:)\]–—]+(?=\s)")
+_WHITESPACE = re.compile(r"\s+")
 # Words whose full stop is usually not the end of a sentence (titles before a name).
 _ABBREVIATIONS = frozenset({"Dr", "Mr", "Mrs", "Ms", "Prof", "Sr", "Sra", "Jr", "St"})
 # Whitespace runs, plus the gap after full-width punctuation, which needs no space:
@@ -76,3 +80,45 @@ def _ends_sentence(text: str, gap: re.Match[str]) -> bool:
         return False
     word = text[text.rfind(" ", 0, end) + 1 : end]
     return text[end] != "." or not (len(word) == 1 or word in _ABBREVIATIONS)
+
+
+def split_to_fit(
+    text: str, offsets: list[tuple[int, int]], window: int
+) -> list[tuple[str, str]]:
+    """`text` cut into pieces of at most `window` tokens, each with the whitespace after it.
+
+    `offsets` holds the `(start, end)` characters of each of the text's tokens. A piece
+    ends after the last clause punctuation (`,`, `;`, `:`, a closing bracket or dash) in
+    its window, as long as that keeps at least a third of the window; otherwise at the
+    window's last whitespace, and at a token boundary when it has none. Joining every
+    piece and its whitespace gives `text` back.
+    """
+    if window < 1:
+        raise ValueError(f"window must be >= 1, got {window}")
+    starts = [start for start, _ in offsets]
+    pieces: list[tuple[str, str]] = []
+    begin = 0  # first character of the current piece
+    first = 0  # its first token
+    while len(starts) - first > window:
+        # The first character past the window.
+        end = max(starts[first + window], begin + 1)
+        cut = _cut(text, begin, end)
+        gap = _WHITESPACE.match(text, cut)
+        resume = gap.end() if gap else cut
+        pieces.append((text[begin:cut], text[cut:resume]))
+        begin = resume
+        first = bisect_left(starts, begin)
+    pieces.append((text[begin:], ""))
+    return pieces
+
+
+def _cut(text: str, begin: int, end: int) -> int:
+    """Where to end a piece that starts at `begin` and must end by `end`."""
+    floor = begin + (end - begin) // 3
+    clauses = [m.end() for m in _CLAUSE_END.finditer(text, begin, end)]
+    if clauses and clauses[-1] > floor:
+        return clauses[-1]
+    spaces = [m.start() for m in _WHITESPACE.finditer(text, floor, end)]
+    if spaces and spaces[-1] > begin:
+        return spaces[-1]
+    return end

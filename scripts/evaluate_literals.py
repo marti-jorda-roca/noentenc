@@ -22,7 +22,6 @@ from noentenc.translation import (
     SMaLL100Model,
     Translator,
 )
-from noentenc.translation._literals import find_literals
 
 # Messages per source language (ISO 639-1), in scripts/data/literal_messages.json.
 MESSAGES = {
@@ -65,10 +64,14 @@ def _translators(names: list[str]) -> dict[str, Callable[[L, L], Translator | No
     return found
 
 
+# Only finds literals; it never loads a model.
+_LITERALS = Translator()
+
+
 def _kept(original: str, translated: str) -> bool:
     return all(
-        translated.count(original[a:b]) >= original.count(original[a:b])
-        for a, b in find_literals(original)
+        translated.count(span.text) >= original.count(span.text)
+        for span in _LITERALS.find_literals(original)
     )
 
 

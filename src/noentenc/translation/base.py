@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Final, Literal, overload
 
@@ -28,7 +28,14 @@ from noentenc.languages import (
 )
 from noentenc.profiles import Profile
 from noentenc.translation import _routing
-from noentenc.translation._literals import compile_keep, translate_preserving
+from noentenc.translation._literals import (
+    LiteralKind,
+    LiteralSpan,
+    check_kinds,
+    compile_keep,
+    find_literals,
+    translate_preserving,
+)
 from noentenc.translation.models.base import (
     BaseModel,
     Translation,
@@ -36,7 +43,7 @@ from noentenc.translation.models.base import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterator
     from pathlib import Path
 
     import pandas as pd
@@ -54,6 +61,9 @@ UnknownSourcePolicy = Literal["keep", "fallback", "raise"]
 
 # Pass as `source_language` to detect each text's language.
 AUTO: Final = "auto"
+
+# Which literals to keep: every kind (True), none (False), or the kinds listed.
+PreservePolicy = bool | Iterable[LiteralKind | str]
 
 # Models a profile-based `Translator` keeps loaded at once. Two cover a pair model plus the
 # SMaLL-100 fallback; see docs/benchmarks.md#memory for the RAM each model takes.
@@ -90,8 +100,8 @@ class Translator:
     `model` is a model, or a `Profile` that picks one per language pair (`None` is
     `"speed"`). Models are loaded lazily on first use and then reused.
 
-    Every profile uses a direct Opus-MT model when one exists for the pair. For the
-    other pairs:
+    Every profile uses a direct Opus-MT model when one exists for the pair: at q4, and
+    at fp32 for `quality` (the most accurate export, 425 MB). For the other pairs:
 
     - `speed`: SMaLL-100 (int8, 595 MB).
     - `balance`: NLLB-200 600M (int8, 860 MB), about 7x slower than SMaLL-100.
@@ -134,10 +144,15 @@ class Translator:
     what a profile would do without loading or downloading a model.
 
     Literal text is kept: URLs, email addresses, mentions, hashtags, numbers, inline
-    code, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags and Markdown
-    link targets are swapped for placeholders the models copy through, then put back. If
+    code, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags, Markdown
+    link targets, file paths, code identifiers (`getUserName`, `user_id`), and hashes,
+    UUIDs and base64 are swapped for placeholders the models copy through, then put
+    back. Fenced code blocks never reach the model. If
     a translation loses a placeholder, the prose around the literals is translated piece
-    by piece instead, so literals always survive. `preserve=False` turns this off.
+    by piece instead, so literals always survive. `preserve=False` turns this off, and a
+    list of `LiteralKind`s keeps only those kinds (and the `keep` terms): leaving out
+    `"number"` lets the model make the words around a number agree with it.
+    `find_literals()` shows what would be kept.
 
     `keep` adds your own literals, such as brand and product names: a string is kept
     where it appears as a whole word, case included (`"Nike"` but not "Nikes"), and a
@@ -218,17 +233,22 @@ class Translator:
 
         Loads and downloads nothing. With `source_language="auto"` the plan holds the
         detector and every model a detected language could be routed to. Raises like
-        `translate` when no allowed model translates the pair.
+        `translate` when no allowed model translates the pair. A translator given a
+        `model` describes that model (its `plan()`), already loaded.
         """
         from noentenc.language_detection.base import check_profile_plan
 
-        if self.model is not None:
-            raise ValueError(
-                "plan() describes profile models; this translator was given one"
-            )
         target, source, auto = _check_arguments(
             target_language, source_language, 32, "raise"
         )
+        if self.model is not None:
+            if not auto:
+                self.model.schema.validate(source, target, type(self.model).__name__)
+                return Plan((self.model.plan(),))
+            detector = check_profile_plan(
+                self.profile, self.constraints, self.cache_dir
+            )
+            return Plan((detector, self.model.plan()))
         if not auto:
             choice = _routing.choose(self.profile, source, target, self.constraints)
             return Plan((choice.plan(self.cache_dir),))
@@ -278,6 +298,19 @@ class Translator:
             target=frozenset(targets),
         )
 
+    def find_literals(
+        self, text: str, preserve: PreservePolicy = True
+    ) -> list[LiteralSpan]:
+        """The literals translating `text` with `preserve` would keep, in order.
+
+        Each has its `LiteralKind` (None for a `keep` term), position and text. Loads
+        nothing.
+        """
+        kinds = check_kinds(preserve)
+        if kinds is None:
+            return []
+        return find_literals(text, self.keep, kinds)
+
     def _choice_or_none(
         self, source: Language | None, target: Language
     ) -> _routing.ModelChoice | None:
@@ -314,9 +347,10 @@ class Translator:
         source_language: Language | str | None = None,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[False] = False,
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> str: ...
 
     @overload
@@ -327,9 +361,10 @@ class Translator:
         source_language: Language | str | None = None,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[True],
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> Translation: ...
 
     def translate(
@@ -339,24 +374,29 @@ class Translator:
         source_language: Language | str | None = None,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: bool = False,
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> str | Translation:
         """Translate `text`, sentence by sentence, keeping its whitespace and line breaks.
 
-        A sentence longer than the model reads raises `InputTooLongError`; with
-        `truncate` its end is dropped instead. With `detailed` the result is a
+        A sentence longer than the model reads raises `InputTooLongError`. With
+        `split_long` it is cut into pieces that fit, at clause punctuation or spaces, and
+        each piece is translated, so nothing is lost; a sentence whose output hits the
+        length limit is translated again in halves too. With `truncate` its end is
+        dropped instead. With `detailed` the result is a
         `Translation`, which says whether input was dropped or output cut short, which
         source language and model were used, and what the detector found.
 
         Blank text, and text whose `source_language` is `target_language`, come back
         unchanged without loading a model. `source_language="auto"` detects it.
 
-        URLs, email addresses, mentions, hashtags, numbers, inline code, template
-        placeholders, HTML tags and the translator's `keep` terms come back byte-for-byte
+        URLs, email addresses, mentions, hashtags, numbers, code (inline and fenced
+        blocks), template placeholders, HTML tags, file paths, code identifiers, hashes
+        and base64, and the translator's `keep` terms come back byte-for-byte
         (see `Translation.preservation`); `preserve=False` sends the text to the model
-        as it is.
+        as it is, and a list of `LiteralKind`s keeps only those kinds and `keep`'s terms.
         """
         (translation,) = self._translate(
             [text],
@@ -367,6 +407,7 @@ class Translator:
             "raise",
             unknown_source,
             preserve=preserve,
+            split_long=split_long,
         )
         return translation if detailed else translation.text
 
@@ -379,10 +420,11 @@ class Translator:
         batch_size: int = 32,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[False] = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> list[str]: ...
 
     @overload
@@ -394,10 +436,11 @@ class Translator:
         batch_size: int = 32,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[True],
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> list[Translation]: ...
 
     def translate_batch(
@@ -408,10 +451,11 @@ class Translator:
         batch_size: int = 32,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: bool = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> list[str] | list[Translation]:
         """Translate each of `texts`, like `translate`, in input order.
 
@@ -432,6 +476,7 @@ class Translator:
             errors,
             unknown_source,
             preserve=preserve,
+            split_long=split_long,
         )
         return translations if detailed else [t.text for t in translations]
 
@@ -445,10 +490,11 @@ class Translator:
         *,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[False] = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> Iterator[str]: ...
 
     @overload
@@ -461,10 +507,11 @@ class Translator:
         *,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[True],
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> Iterator[Translation]: ...
 
     def translate_stream(
@@ -476,10 +523,11 @@ class Translator:
         *,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: bool = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> Iterator[str] | Iterator[Translation]:
         """Translate `texts` as they are read, yielding each result in input order.
 
@@ -504,6 +552,7 @@ class Translator:
         _check_arguments(
             target_language, source_language, batch_size, errors, unknown_source
         )
+        check_kinds(preserve)
         translations = self._translate_chunks(
             stream_chunks(texts, chunk_size),
             target_language,
@@ -513,6 +562,7 @@ class Translator:
             errors,
             unknown_source,
             preserve,
+            split_long=split_long,
         )
         return translations if detailed else (t.text for t in translations)
 
@@ -525,7 +575,9 @@ class Translator:
         truncate: bool,
         errors: ErrorPolicy,
         unknown_source: UnknownSourcePolicy,
-        preserve: bool,
+        preserve: PreservePolicy,
+        *,
+        split_long: bool,
     ) -> Iterator[Translation]:
         offset = 0
         for chunk in chunks:
@@ -538,6 +590,7 @@ class Translator:
                 errors,
                 unknown_source,
                 preserve=preserve,
+                split_long=split_long,
                 offset=offset,
             )
             offset += len(chunk)
@@ -554,12 +607,13 @@ class Translator:
         show_progress: bool = True,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         errors: ErrorPolicy = "raise",
         error_column: str | None = None,
         unknown_source: UnknownSourcePolicy = "keep",
         status_column: str | None = None,
         source_column: str | None = None,
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> pl.DataFrame: ...
 
     @overload
@@ -574,12 +628,13 @@ class Translator:
         show_progress: bool = True,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         errors: ErrorPolicy = "raise",
         error_column: str | None = None,
         unknown_source: UnknownSourcePolicy = "keep",
         status_column: str | None = None,
         source_column: str | None = None,
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> pd.DataFrame: ...
 
     def translate_dataset(
@@ -593,18 +648,19 @@ class Translator:
         show_progress: bool = True,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         errors: ErrorPolicy = "raise",
         error_column: str | None = None,
         unknown_source: UnknownSourcePolicy = "keep",
         status_column: str | None = None,
         source_column: str | None = None,
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
     ) -> pl.DataFrame | pd.DataFrame:
         """Return `dataset` with `result_column` holding the translation of `target_column`.
 
         Works with polars and pandas frames; rows keep their order and null texts stay
         null. Texts are translated like `translate_batch`, including `truncate`,
-        `errors`, `source_language="auto"` and `unknown_source`. With
+        `split_long`, `errors`, `source_language="auto"` and `unknown_source`. With
         `errors="record"` a row whose translation raises gets a null translation, and
         its error in `error_column` if given (null for the other rows).
 
@@ -618,6 +674,7 @@ class Translator:
         _check_arguments(
             target_language, source_language, batch_size, errors, unknown_source
         )
+        check_kinds(preserve)
         values = column_values(dataset, target_column)
         rows = [i for i, value in enumerate(values) if isinstance(value, str)]
         with tqdm(
@@ -633,6 +690,7 @@ class Translator:
                 unknown_source,
                 progress=progress.update,
                 preserve=preserve,
+                split_long=split_long,
             )
         results: list[str | None] = [None] * len(values)
         failures: list[str | None] = [None] * len(values)
@@ -667,7 +725,8 @@ class Translator:
         unknown_source: UnknownSourcePolicy,
         progress: Callable[[int], object] | None = None,
         *,
-        preserve: bool = True,
+        preserve: PreservePolicy = True,
+        split_long: bool = False,
         offset: int = 0,
     ) -> list[Translation]:
         """Translate `texts`, answering what needs no model before loading one.
@@ -678,6 +737,7 @@ class Translator:
         target, source, auto = _check_arguments(
             target_language, source_language, batch_size, errors, unknown_source
         )
+        kinds = check_kinds(preserve)
         # Blank texts and same-language requests stay as given; translate the rest.
         results = [
             Translation(t, status=TranslationStatus.UNCHANGED, source_language=source)
@@ -718,7 +778,8 @@ class Translator:
                     batch_size,
                     truncate,
                     errors,
-                    preserve,
+                    kinds,
+                    split_long=split_long,
                 )
                 for i, translation in zip(indices, translated, strict=True):
                     results[i] = replace(
@@ -741,19 +802,25 @@ class Translator:
         batch_size: int,
         truncate: bool,
         errors: ErrorPolicy,
-        preserve: bool,
+        kinds: frozenset[LiteralKind] | None,
+        *,
+        split_long: bool,
     ) -> list[Translation]:
+        """`kinds` are the literals to keep, with `keep`'s terms; None keeps nothing."""
+
         def run(batch: list[str]) -> list[Translation]:
+            # Only when asked, so models written before `split_long` keep working.
+            extra = {"split_long": True} if split_long else {}
             return model.predict_batch_detailed(
-                batch, target, source, batch_size, truncate=truncate
+                batch, target, source, batch_size, truncate=truncate, **extra
             )
 
         def translate(batch: list[str]) -> list[Translation]:
             return run(batch) if errors == "raise" else _record_failures(batch, run)
 
-        if not preserve:
+        if kinds is None:
             return translate(texts)
-        return translate_preserving(texts, translate, self.keep)
+        return translate_preserving(texts, translate, self.keep, kinds)
 
     def _auto_groups(
         self,

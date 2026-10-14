@@ -118,9 +118,13 @@ def test_detailed_results_default_to_nothing_missing(translator: Translator) -> 
 
 
 class TruncatingModel(UpperModel):
-    """Reports every text as truncated when asked to truncate."""
+    """Reports every text as truncated when asked to truncate.
 
-    def predict_batch_detailed(
+    Written like a custom model from before `split_long`: `Translator` must keep calling
+    it without that argument.
+    """
+
+    def predict_batch_detailed(  # ty: ignore[invalid-method-override]
         self,
         texts: list[str],
         target_language: Language,
@@ -694,3 +698,40 @@ def test_invalid_num_threads(value: object, error: type[Exception]) -> None:
 def test_num_threads_is_for_profiles_only() -> None:
     with pytest.raises(ValueError, match="num_threads .* a profile loads"):
         Translator(UpperModel(), num_threads=2)
+
+
+class SplittingModel(UpperModel):
+    """Records the `split_long` each call was given."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.split_long: list[bool] = []
+
+    def predict_batch_detailed(
+        self,
+        texts: list[str],
+        target_language: Language,
+        source_language: Language | None = None,
+        batch_size: int = 32,
+        *,
+        truncate: bool = False,
+        split_long: bool = False,
+    ) -> list[Translation]:
+        self.split_long.append(split_long)
+        return [
+            Translation(text, input_split=split_long)
+            for text in self.predict_batch(texts, target_language, source_language)
+        ]
+
+
+def test_split_long_reaches_the_model() -> None:
+    model = SplittingModel()
+    translator = Translator(model)
+    assert not translator.translate("a", EN, detailed=True).input_split
+    assert translator.translate("a", EN, split_long=True, detailed=True).input_split
+    (result,) = translator.translate_batch(["a"], EN, split_long=True, detailed=True)
+    assert result.input_split
+    assert list(translator.translate_stream(["a"], EN, split_long=True)) == ["A:en"]
+    frame = pl.DataFrame({"text": ["a"]})
+    translator.translate_dataset(frame, "text", "out", EN, split_long=True)
+    assert model.split_long == [False, True, True, True, True]

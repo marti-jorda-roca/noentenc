@@ -130,11 +130,11 @@ translator.translate_batch(
 
 `Translator()` picks the lightest model for each pair. It uses a dedicated Opus-MT model when one exists for the direction (66 directions, about 75M parameters each). For any other pair it uses SMaLL-100, which covers 100 languages, and so does a call with no source language at all. A model that can't handle a pair raises `UnsupportedLanguageError`. Languages are `Language` members or codes and names: `"es"`, `"spa"`, `"es-ES"` and `"spanish"` all mean Spanish. `noentenc.to_language()` does that conversion on its own, which also turns detector labels like `"spa"` or `"cmn"` into `Language` members.
 
-Text of any length works. It is split into sentences, they are translated in one batch, and the translations are joined back with the original spaces, line breaks and blank lines. A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` instead of being cut silently. Pass `truncate=True` to translate only its start, and `detailed=True` to get a `Translation` that says whether input was dropped (`input_truncated`) or the output hit its length limit (`output_limit_reached`).
+Text of any length works. It is split into sentences, they are translated in one batch, and the translations are joined back with the original spaces, line breaks and blank lines. A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` instead of being cut silently. Pass `split_long=True` to translate it in pieces that fit, cut after commas or at spaces, or `truncate=True` to translate only its start. `detailed=True` gives a `Translation` that says whether a sentence was split (`input_split`), input was dropped (`input_truncated`) or the output hit its length limit (`output_limit_reached`).
 
 `Translator` keeps the models it loads for later calls, at most two at a time by default. A loaded model needs a lot more RAM than its download: about 1.1 GB for an Opus-MT pair at q4 and 1.15 GB for SMaLL-100. Pass `max_loaded_models=` to change the limit (`None` for no limit), and call `translator.unload()` to free them all. See [memory](docs/benchmarks.md#memory).
 
-Links, emails and placeholders survive. URLs, email addresses, mentions, hashtags, numbers, inline code, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags and Markdown link targets come back byte-for-byte while the prose around them is translated:
+Links, emails, code and placeholders survive. URLs, email addresses, mentions, hashtags, numbers, inline code and fenced code blocks, template placeholders (`{name}`, `{{x}}`, `${x}`, `%s`), HTML tags, Markdown link targets, file paths, code identifiers (`getUserName`, `user_id`), and hashes, UUIDs and base64 come back byte-for-byte while the prose around them is translated:
 
 ```python
 translator.translate(
@@ -144,7 +144,7 @@ translator.translate(
 # Without it (preserve=False), Opus-MT writes https://ejemplo.com/reset?id=42: another site.
 ```
 
-`Translator(keep=["Nike", re.compile(r"SKU-\d+")])` keeps your own terms and patterns the same way. See [Keep links and placeholders](docs/quickstart.md#keep-links-and-placeholders) for what is covered and its limits.
+`Translator(keep=["Nike", re.compile(r"SKU-\d+")])` keeps your own terms and patterns the same way. `preserve=` also takes a list of `LiteralKind`s to keep only some kinds: leaving out numbers lets the model make the words around them agree ("Mezclar 200 gramos de harina" rather than "Mezclar los gramos 200 de harina"). `translator.find_literals(text)` lists what a call would keep. See [Keep links and placeholders](docs/quickstart.md#keep-links-and-placeholders) for what is covered and its limits.
 
 For input too large to hold in memory, `translate_stream` takes any iterable of strings, such as a file's lines or a database cursor. It translates a chunk at a time and yields the results in input order; see [Stream large inputs](docs/quickstart.md#stream-large-inputs). `Translator(num_threads=2)` caps the CPU threads each model uses, for when several workers share a machine.
 
@@ -171,7 +171,7 @@ Translator(Profile.BALANCE)  # Opus-MT where it exists, otherwise NLLB-200 at in
 
 On FLORES-200, `balance` raises detection accuracy from 50% to 96% over the 176 languages tested, and NLLB-200 adds up to 19 chrF++ on low-resource pairs such as English to Tamil. See [the profiles benchmark](docs/benchmarks.md#profiles) for the numbers behind each choice. The models behind a profile may change between releases, so pass a model explicitly when you need reproducible output.
 
-All three translation profiles use the same Opus-MT model for the 66 pairs it covers, and SMaLL-100 for texts without a source language. They only differ on the other pairs; see [routing](docs/benchmarks.md#routing).
+All three translation profiles use Opus-MT for the 66 pairs it covers, at q4 for `speed` and `balance` and at fp32 for `quality`, and SMaLL-100 for texts without a source language. fp32 scored highest on all 12 Opus-MT pairs tested, 0.4 chrF++ above q4 on average, for 425 MB instead of 287 MB. See [routing](docs/benchmarks.md#routing).
 
 ### Check before you download
 
@@ -227,7 +227,7 @@ Results go to stdout and progress and errors to stderr, and the exit code says w
 | [choose_detection_backend.py](docs/examples/choose_detection_backend.py) | Swap backends, restrict candidate languages, collapse macrolanguages. |
 | [choose_translation_model.py](docs/examples/choose_translation_model.py) | Pick a model, precision and thread count, and run offline. |
 | [prepare_offline.py](docs/examples/prepare_offline.py) | Download a profile's weights into one directory, then detect and translate without network access. |
-| [translate_long_text.py](docs/examples/translate_long_text.py) | Translate emails and documents, and choose between an error and `truncate=True` for over-long sentences. |
+| [translate_long_text.py](docs/examples/translate_long_text.py) | Translate emails and documents, and choose between an error, `split_long=True` and `truncate=True` for over-long sentences. |
 | [manage_memory.py](docs/examples/manage_memory.py) | Bound how many translation models stay loaded, and free them with `unload()`. |
 | [stream_detection.py](docs/examples/stream_detection.py) | Label every line of a large file with flat memory, and stop reading once you have what you need. |
 | [stream_translation.py](docs/examples/stream_translation.py) | Translate a JSON Lines file of any size with `translate_stream`, writing each result as it comes. |
@@ -277,7 +277,7 @@ Every translation model needs `noentenc[translation]`.
 
 | Model | Languages | Download (default precision) | Licence (weights) |
 |---|---|---|---|
-| `OpusMTModel.from_pair(src, tgt)` | 1 direction each, 66 available (`OPUS_MT_PAIRS`) | 287 MB (q4), 107 MB (int8) | CC-BY-4.0 or Apache-2.0, per pair |
+| `OpusMTModel.from_pair(src, tgt)` | 1 direction each, 66 available (`OPUS_MT_PAIRS`) | 287 MB (q4), 107 MB (int8), 425 MB (fp32) | CC-BY-4.0 or Apache-2.0, per pair |
 | `SMaLL100Model` | any source → 100 targets | 595 MB (int8) | MIT |
 | `M2M100Model` | 100 ↔ 100 | 603 MB (int8) | MIT |
 | `NLLBModel` | 196 ↔ 196 | 860 MB (int8) | CC-BY-NC-4.0, used by the `balance` and `quality` profiles |

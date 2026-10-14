@@ -163,18 +163,24 @@ translator.translate(
 # 'Hola Ana,\n\nGracias por tu ayuda.\n- Nos vemos el lunes.\n- Llámame más tarde.'
 ```
 
-A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` rather than losing its end. `truncate=True` translates its start instead. To find out whether that happened, or whether a translation stopped at the output length limit, ask for details.
+A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` rather than losing its end. Pasted logs, transcripts and chat messages without punctuation are often one sentence that long. You have two ways to translate it anyway:
+
+- `split_long=True` cuts it into pieces of at most 128 tokens, after a comma, semicolon or colon where it can and at a space otherwise, and translates each piece. Nothing is lost. Pieces aren't cut longer because the models drop content from inputs anywhere near their limit: on run-on sentences built from FLORES-200, pieces near the 511-token limit scored 47.1 and 41.2 chrF++, against 52.0 and 51.5 at 128 tokens. With it, a sentence whose translation hits the output length limit, which usually means the model is repeating itself, is also translated again in two halves.
+- `truncate=True` translates only its start.
+
+To find out whether either happened, or whether a translation stopped at the output length limit, ask for details.
 
 ```python
 result = translator.translate(
-    email_body, Language.SPANISH, Language.ENGLISH, truncate=True, detailed=True
+    email_body, Language.SPANISH, Language.ENGLISH, split_long=True, detailed=True
 )
 result.text
+result.input_split  # True if a sentence was translated in pieces
 result.input_truncated  # True if part of a sentence was dropped
 result.output_limit_reached  # True if the output may be cut short
 ```
 
-`translate_batch` takes the same `truncate` and `detailed` arguments, and `translate_dataset` takes `truncate`.
+`translate_batch`, `translate_stream` and `translate_dataset` take the same `split_long` and `truncate` arguments, and `translate_batch` and `translate_stream` take `detailed`.
 
 Blank texts, and texts whose source language is already the target, come back unchanged without loading a model. Their detailed status is `unchanged`.
 
@@ -182,13 +188,17 @@ Blank texts, and texts whose source language is already the target, come back un
 
 Machine translation models translate everything they see, including the parts that must not change. Opus-MT turns `https://example.com/reset` into `https://ejemplo.com/reset`, which is a different site. So before a text reaches the model, `Translator` swaps these literals for placeholders the models copy through, and puts them back afterwards:
 
-- URLs (`https://…`, `www.…`) and bare domains with a lowercase ending (`acme.io/help`). A sentence's full stop or an unmatched closing bracket after a URL isn't part of it.
-- Email addresses, `@mentions` and `#hashtags`.
-- Numbers, including decimals, thousands separators, times and dates (`1,299.99`, `14:30`, `12/05/2026`).
-- Inline code in backticks.
-- Template placeholders: `{name}`, `{0}`, `{{name}}`, `${name}`, `%s`, `%d` and `%(name)s`.
-- HTML and XML tags and character references (`<a href="…">`, `</b>`, `&amp;`).
-- Markdown link targets, `](https://…)`. The link text is translated.
+- `url`: URLs (`https://…`, `www.…`) and bare domains with a lowercase ending (`acme.io/help`). A sentence's full stop or an unmatched closing bracket after a URL isn't part of it.
+- `email`, `mention` and `hashtag`: email addresses, `@mentions` and `#hashtags`.
+- `number`: numbers, including decimals, thousands separators, times and dates (`1,299.99`, `14:30`, `12/05/2026`).
+- `code`: inline code in backticks.
+- `code_block`: fenced Markdown code blocks, from a line opening with ```` ``` ```` or `~~~` to the matching fence, or to the end of the text when it's never closed. They never reach the model: the prose before and after each block is translated on its own.
+- `path`: file paths, `/etc/app/config.yaml`, `~/notes.txt`, `./run.sh` and `C:\Users\ana\a.txt`. An absolute path needs two segments, so `and/or` and `/s` aren't paths.
+- `identifier`: code identifiers, `user_id` and camelCase or PascalCase names with two or more humps (`getUserName`). Names with one hump, such as `iPhone` or `JavaScript`, are translated as words.
+- `encoded`: hashes, keys, UUIDs and base64, 16 or more characters that mix letters and digits.
+- `placeholder`: template placeholders, `{name}`, `{0}`, `{{name}}`, `${name}`, `%s`, `%d` and `%(name)s`.
+- `tag`: HTML and XML tags and character references (`<a href="…">`, `</b>`, `&amp;`).
+- `link_target`: Markdown link targets, `](https://…)`. The link text is translated.
 
 ```python
 translator.translate(
@@ -212,11 +222,42 @@ translator.translate("I ordered an Apple Watch from Amazon.", "es", "en")
 
 The model sees a placeholder instead of the term, so it can't make the words around it agree with it. German Opus-MT writes "einen Apple Watch" instead of "eine Apple Watch", and "Amazon Lager" instead of the compound "Amazon-Lager". Keep the terms that the model gets wrong, not every name.
 
+#### Choose what to keep
+
+The names in the list above are `LiteralKind`s (from `noentenc.translation`). Pass `preserve` a list of them to keep only those kinds. Numbers are the kind most worth leaving out: the model sees `ZXQ0` where the number was, so it can't make the words around it agree, and the sentence reads wrong.
+
+```python
+from noentenc.translation import LiteralKind
+
+no_numbers = set(LiteralKind) - {LiteralKind.NUMBER}
+translator.translate("Mix 200 grams of flour with 3 eggs.", "es", "en")
+# 'Mezclar los gramos 200 de harina con los huevos 3.'
+translator.translate(
+    "Mix 200 grams of flour with 3 eggs.", "es", "en", preserve=no_numbers
+)
+# 'Mezclar 200 gramos de harina con 3 huevos.'
+translator.translate("He died at age 37.", "es", "en", preserve=no_numbers)
+# 'Murió a los 37 años.' (with numbers kept: 'Murió a la edad de 37.')
+```
+
+The price is the number's format: the model may rewrite it, and not always correctly (see the limits below). `keep` terms are kept whatever kinds you pass, so `preserve=[]` keeps only them; `preserve=False` keeps nothing. `translate_batch`, `translate_stream` and `translate_dataset` take the same argument.
+
+To see what a call would keep, ask the translator. It loads no model.
+
+```python
+translator.find_literals("Ping @ana at 14:30 about https://a.io/x.")
+# [LiteralSpan(kind=<LiteralKind.MENTION: 'mention'>, start=5, end=9, text='@ana'),
+#  LiteralSpan(kind=<LiteralKind.NUMBER: 'number'>, start=13, end=18, text='14:30'),
+#  LiteralSpan(kind=<LiteralKind.URL: 'url'>, start=25, end=39, text='https://a.io/x')]
+```
+
+It takes the same `preserve` argument. A match of a `keep` term has `kind=None`, and literals that overlap come back as one span.
+
 Limits:
 
-- Only the literals above are protected. Markdown emphasis (`**bold**`), lists and headings, and the text inside HTML tags, are translated like any other text, and a model may move or drop the markup around them.
+- Only the literals above are protected. Markdown emphasis (`**bold**`), lists and headings, indented code blocks, and the text inside HTML tags, are translated like any other text, and a model may move or drop the markup around them.
 - Words can move across tags. German Opus-MT turns `Click <a>here</a> to…` into `Klicken Sie hier <a></a>, um…`. The tags are intact, but the link now wraps nothing.
-- Protected numbers keep their source format: `1,299.99` stays `1,299.99` in Spanish rather than becoming the locale's `1.299,99`. Without preservation it's no better: Opus-MT writes `1,299,99` or `1.299.99`, neither of which is correct.
+- Protected numbers keep their source format: `1,299.99` stays `1,299.99` in Spanish rather than becoming the locale's `1.299,99`. Without preservation it's no better: Opus-MT writes `1,299,99` or `1.299.99`, neither of which is correct. Leaving `number` out of `preserve` trades this for sentences that agree with their numbers, as shown above.
 - This isn't a document translator. Long HTML or Markdown documents work best when you translate their text nodes yourself.
 
 [Benchmarks](benchmarks.md#literal-text) has how often each model keeps literals with and without preservation.
@@ -320,13 +361,13 @@ Translator(Profile.BALANCE)
 | `balance` | fastText `openlid-v3`: 1.2 GB, 195 languages, GPL-3.0 | NLLB-200 600M at int8: 860 MB, 196 languages, CC-BY-NC-4.0 |
 | `quality` | fastText `glotlid`: 1.7 GB, 2102 languages | NLLB-200 600M at fp32: 3.5 GB, 196 languages, CC-BY-NC-4.0 |
 
-Every translation profile uses the dedicated Opus-MT model when the pair has one (66 directions). On those pairs it scored as well as NLLB-200 on average and is about 8× faster. Without a source language, Opus-MT and NLLB-200 can't be used, so every profile uses SMaLL-100.
+Every translation profile uses the dedicated Opus-MT model when the pair has one (66 directions). On those pairs it scored as well as NLLB-200 on average and is about 8× faster. `speed` and `balance` load it at q4 (287 MB) and `quality` at fp32 (425 MB), which scored higher on all 12 pairs tested. Without a source language, Opus-MT and NLLB-200 can't be used, so every profile uses SMaLL-100.
 
 `openlid-v3` and `glotlid` return individual languages: Swahili comes back as `swh`, and Congo Swahili as `swc`, where `lid176` says `swa`. To get one code per macrolanguage, pass the model yourself with `collapse_macrolanguages=True`.
 
 Check the licences before you use `balance` or `quality` commercially. NLLB-200 is non-commercial (CC-BY-NC-4.0) and warns when it loads, and `openlid-v3` is GPL-3.0. [Benchmarks](benchmarks.md#profiles) has the accuracy and speed of each choice, and [choose_profile.py](examples/choose_profile.py) runs all three profiles.
 
-The three profiles often pick the same translation model. Opus-MT pairs use Opus-MT in every profile, and texts without a source language use SMaLL-100 in every profile. So `quality` only changes the output of other pairs. [Routing](benchmarks.md#routing) has the full table.
+The three profiles often pick the same translation model. Opus-MT pairs use Opus-MT in every profile, at fp32 in `quality`, and texts without a source language use SMaLL-100 in every profile. So `speed` and `balance` give the same output on Opus-MT pairs, and `quality` a slightly better one. [Routing](benchmarks.md#routing) has the full table.
 
 #### Plan, and set limits
 
@@ -342,9 +383,9 @@ plan = noentenc.plan("balance", translation=[("ja", "ca")])
 plan.missing_bytes  # what still has to download
 ```
 
-`memory_bytes` is resident memory once loaded. `memory_basis` says whether that was measured (see [Memory](benchmarks.md#memory)) or estimated. `Translator(...).plan(target, source)` does the same for one pair, and `LanguageDetector(...).plan()` for a detector. `Translator.supports(target, source)` and `Translator.supported_languages()` say which pairs a profile covers.
+`memory_bytes` is resident memory once loaded. `memory_basis` says whether that was measured (see [Memory](benchmarks.md#memory)) or estimated. `Translator(...).plan(target, source)` does the same for one pair, and `LanguageDetector(...).plan()` for a detector. A translator given a model describes that model, already loaded, with its precision, licence and size on disk: `Translator(OpusMTModel.from_pair("en", "es", precision="fp32")).plan("es", "en")`. A model's `repr` names it too, `OpusMTModel(model='Xenova/opus-mt-en-es', precision='fp32')`. `Translator.supports(target, source)` and `Translator.supported_languages()` say which pairs a profile covers.
 
-To keep a profile within your licence policy or download budget, pass `allowed_licenses` (SPDX identifiers) and `max_download_bytes`. A profile then skips a model that breaks them for its next choice. NLLB-200 gives way to SMaLL-100, and Opus-MT q4 gives way to the smaller Opus-MT int8. If nothing is left, the call raises `ModelConstraintError` before downloading.
+To keep a profile within your licence policy or download budget, pass `allowed_licenses` (SPDX identifiers) and `max_download_bytes`. A profile then skips a model that breaks them for its next choice. NLLB-200 gives way to SMaLL-100, and Opus-MT gives way to its smaller exports: fp32 to q4, and q4 to int8. If nothing is left, the call raises `ModelConstraintError` before downloading.
 
 ```python
 from noentenc.translation import Translator
@@ -407,7 +448,8 @@ Translator(SMaLL100Model())
 # low-resource languages, and about 4x slower. It needs the source language.
 Translator(M2M100Model())
 
-# Pick a precision explicitly: fp32, int8 or q4, where the export has it.
+# Pick a precision explicitly: fp32, int8 or q4, where the export has it. For Opus-MT,
+# fp32 scored highest on all 12 pairs tested (docs/benchmarks.md#opus-mt-precision).
 Translator(
     OpusMTModel.from_pair(Language.ENGLISH, Language.GERMAN, precision=Precision.FP32)
 )

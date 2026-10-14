@@ -1,4 +1,5 @@
 from noentenc.profiles import Profile
+from noentenc.translation._literals import LiteralKind, LiteralSpan
 from noentenc.translation.base import SourceLanguageError, Translator
 from noentenc.translation.models._seq2seq import Precision
 from noentenc.translation.models.base import (
@@ -14,6 +15,8 @@ from noentenc.translation.models.small100 import SMaLL100Model
 __all__ = [
     "OPUS_MT_PAIRS",
     "InputTooLongError",
+    "LiteralKind",
+    "LiteralSpan",
     "M2M100Model",
     "NLLBModel",
     "OpusMTModel",

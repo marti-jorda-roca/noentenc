@@ -34,6 +34,7 @@ from noentenc.cli import _inventory
 from noentenc.languages import UnsupportedLanguageError
 from noentenc.profiles import Profile
 from noentenc.translation import (
+    LiteralKind,
     SourceLanguageError,
     Translation,
     TranslationStatus,
@@ -260,6 +261,12 @@ def _compile_patterns(
     "failing the text.",
 )
 @click.option(
+    "--split-long",
+    is_flag=True,
+    help="Translate a sentence too long for the model in pieces that fit instead "
+    "of failing the text, and retry in halves a sentence whose translation runs on.",
+)
+@click.option(
     "--keep",
     "keep_terms",
     multiple=True,
@@ -283,6 +290,17 @@ def _compile_patterns(
     help="Send URLs, emails, code, placeholders and --keep terms to the model like "
     "any other text.",
 )
+@click.option(
+    "--no-preserve-kind",
+    "skipped_kinds",
+    multiple=True,
+    type=click.Choice([str(kind) for kind in LiteralKind]),
+    metavar="KIND",
+    help="Send this kind of literal to the model like any other text, e.g. number, "
+    "so the words around it agree with it. Repeat for more kinds. KIND is one of: "
+    + ", ".join(str(kind) for kind in LiteralKind)
+    + ".",
+)
 @_profile_options
 def translate(
     *,
@@ -294,9 +312,11 @@ def translate(
     source: str,
     unknown_source: UnknownSourcePolicy,
     truncate: bool,
+    split_long: bool,
     keep_terms: list[str],
     keep_patterns: list[re.Pattern[str]],
     no_preserve: bool,
+    skipped_kinds: tuple[str, ...],
     profile: str,
     cache_dir: Path | None,
 ) -> None:
@@ -324,10 +344,12 @@ def translate(
         target,
         source,
         truncate=truncate,
+        split_long=split_long,
         detailed=True,
         errors="record",
         unknown_source=unknown_source,
-        preserve=not no_preserve,
+        preserve=not no_preserve
+        and [kind for kind in LiteralKind if kind not in skipped_kinds],
     )
     total = failed = 0
     for text, translation in zip(inputs, results, strict=True):

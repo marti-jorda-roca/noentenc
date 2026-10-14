@@ -31,6 +31,11 @@ except InputTooLongError as error:
     print(error)
     # OpusMTModel reads at most 511 tokens per sentence, and this one has 600: ...
 
+# split_long=True: the sentence is cut into pieces of at most 128 tokens, after commas
+# or at spaces, and every piece is translated. Nothing is dropped.
+result = translator.translate(run_on, ES, EN, split_long=True, detailed=True)
+print(result.input_split, result.input_truncated)  # True False
+
 # truncate=True: only the start of the sentence is translated, the rest is dropped.
 # Ask for details to find out whether that happened.
 result = translator.translate(run_on, ES, EN, truncate=True, detailed=True)
@@ -39,9 +44,11 @@ print(result.output_limit_reached)  # True: the output may also be cut short
 
 # 3. Short text never hits the limit, so the flags stay False.
 result = translator.translate(email, ES, EN, detailed=True)
-print(result.input_truncated, result.output_limit_reached)  # False False
+print(result.input_split, result.input_truncated, result.output_limit_reached)
+# False False False
 
-# translate_batch takes the same arguments, and translate_dataset takes truncate=,
+# translate_batch takes the same arguments, and translate_dataset takes split_long=
+# and truncate=,
 # so one oversized row doesn't stop a whole DataFrame.
 short, long = translator.translate_batch(["Hello.", run_on], ES, EN, truncate=True)
 print(short, long[:40])  # Hola. el tiempo es agradable el tiempo es agra

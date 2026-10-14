@@ -1,13 +1,21 @@
 """URLs, emails, code, placeholders, tags and numbers survive translation byte-for-byte."""
 
 import re
+from collections.abc import Iterator
 
 import polars as pl
 import pytest
 
 from noentenc import Language
-from noentenc.translation import Translation, TranslationStatus, Translator
+from noentenc.translation import (
+    LiteralKind,
+    LiteralSpan,
+    Translation,
+    TranslationStatus,
+    Translator,
+)
 from noentenc.translation._literals import (
+    check_kinds,
     compile_keep,
     find_literals,
     mask,
@@ -20,7 +28,7 @@ ES = Language.SPANISH
 
 
 def literals(text: str, keep: tuple[re.Pattern[str], ...] = ()) -> list[str]:
-    return [text[a:b] for a, b in find_literals(text, keep)]
+    return [span.text for span in find_literals(text, keep)]
 
 
 @pytest.mark.parametrize(
@@ -300,3 +308,209 @@ def test_translator_keep() -> None:
     ]
     # preserve=False sends the terms to the model too.
     assert translator.translate("Nike", ES, "en", preserve=False) == "NIKE:es"
+
+
+def test_find_literals_reports_kinds_and_positions() -> None:
+    text = "Ping @ana at 14:30 about https://a.io/x."
+    assert find_literals(text) == [
+        LiteralSpan(LiteralKind.MENTION, 5, 9, "@ana"),
+        LiteralSpan(LiteralKind.NUMBER, 13, 18, "14:30"),
+        LiteralSpan(LiteralKind.URL, 25, 39, "https://a.io/x"),
+    ]
+
+
+def test_kinds_select_the_literals_found() -> None:
+    text = "Mix 200 g at 14:30, see https://a.io or #recipes"
+    no_numbers = frozenset(LiteralKind) - {LiteralKind.NUMBER}
+    assert [s.text for s in find_literals(text, kinds=no_numbers)] == [
+        "https://a.io",
+        "#recipes",
+    ]
+    assert find_literals(text, kinds=frozenset()) == []
+    # Without the number pattern, nothing else claims the digits.
+    assert [s.text for s in find_literals("v 1.2.3", kinds=no_numbers)] == []
+
+
+def test_keep_matches_have_no_kind_and_merge_into_the_first_literal() -> None:
+    keep = compile_keep(["Nike Air 90", "acme"])
+    spans = find_literals("Buy Nike Air 90 at https://acme.io/shop", keep)
+    assert [(s.kind, s.text) for s in spans] == [
+        (None, "Nike Air 90"),
+        (LiteralKind.URL, "https://acme.io/shop"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("preserve", "expected"),
+    [
+        (True, frozenset(LiteralKind)),
+        (False, None),
+        ([], frozenset()),
+        (["url", LiteralKind.EMAIL], {LiteralKind.URL, LiteralKind.EMAIL}),
+    ],
+)
+def test_check_kinds(preserve: object, expected: object) -> None:
+    assert check_kinds(preserve) == expected  # ty: ignore[invalid-argument-type]
+
+
+@pytest.mark.parametrize(
+    ("preserve", "error"),
+    [("url", TypeError), (["urls"], ValueError), ([None], ValueError)],
+)
+def test_check_kinds_rejects_bad_values(
+    preserve: object, error: type[Exception]
+) -> None:
+    with pytest.raises(error):
+        check_kinds(preserve)  # ty: ignore[invalid-argument-type]
+
+
+def test_preserve_kinds_keep_only_those_kinds(translator: Translator) -> None:
+    text = "see #deals at https://a.io"
+    assert translator.translate(text, ES, "en", preserve=["url"]) == (
+        "SEE #DEALS AT https://a.io:es"
+    )
+    assert translator.translate_batch([text], ES, "en", preserve=["hashtag"]) == [
+        "SEE #deals AT HTTPS://A.IO:es"
+    ]
+    assert list(translator.translate_stream([text], ES, "en", preserve=[])) == [
+        text.upper() + ":es"
+    ]
+    frame = pl.DataFrame({"text": [text]})
+    out = translator.translate_dataset(frame, "text", "es", ES, "en", preserve=["url"])
+    assert out["es"].to_list() == ["SEE #DEALS AT https://a.io:es"]
+
+
+def test_empty_preserve_still_keeps_keep_terms() -> None:
+    translator = Translator(UpperModel(), keep=["Nike"])
+    assert translator.translate("buy Nike at acme.io", ES, "en", preserve=[]) == (
+        "BUY Nike AT ACME.IO:es"
+    )
+
+
+def test_bad_preserve_fails_before_reading_or_translating(
+    translator: Translator,
+) -> None:
+    def never_read() -> Iterator[str]:
+        raise AssertionError("read")
+        yield ""
+
+    with pytest.raises(ValueError, match="unknown literal kind"):
+        translator.translate_stream(never_read(), ES, "en", preserve=["links"])
+    with pytest.raises(TypeError, match="wrap it in a list"):
+        translator.translate("hola", ES, "en", preserve="url")
+    model = translator.model
+    assert isinstance(model, UpperModel)
+    assert model.batches == []
+
+
+def test_translator_find_literals() -> None:
+    translator = Translator(UpperModel(), keep=["Nike"])
+    text = "Nike costs 90 at acme.io"
+    assert [(s.kind, s.text) for s in translator.find_literals(text)] == [
+        (None, "Nike"),
+        (LiteralKind.NUMBER, "90"),
+        (LiteralKind.URL, "acme.io"),
+    ]
+    assert [s.text for s in translator.find_literals(text, ["url"])] == [
+        "Nike",
+        "acme.io",
+    ]
+    assert translator.find_literals(text, preserve=False) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "Fix:\n```python\nprint('hi')\n```\nThanks",
+            [(LiteralKind.CODE_BLOCK, "```python\nprint('hi')\n```")],
+        ),
+        # Never closed: the block runs to the end of the text.
+        ("Run:\n~~~\nmake all", [(LiteralKind.CODE_BLOCK, "~~~\nmake all")]),
+        # A fence must open a line; mid-line backticks stay inline code.
+        ("Inline ```x``` here", [(LiteralKind.CODE, "`x`")]),
+        (
+            "Edit /etc/app/config.yaml, ~/notes.txt, ./run.sh or C:\\Users\\ana\\a.txt.",
+            [
+                (LiteralKind.PATH, "/etc/app/config.yaml"),
+                (LiteralKind.PATH, "~/notes.txt"),
+                (LiteralKind.PATH, "./run.sh"),
+                (LiteralKind.PATH, "C:\\Users\\ana\\a.txt"),
+            ],
+        ),
+        # Not paths: words around a slash, one-segment absolute paths.
+        ("and/or km/h TCP/IP /s", []),
+        (
+            "Call getUserName with user_id on x86_64",
+            [
+                (LiteralKind.IDENTIFIER, "getUserName"),
+                (LiteralKind.IDENTIFIER, "user_id"),
+                (LiteralKind.IDENTIFIER, "x86_64"),
+            ],
+        ),
+        # Not identifiers: names with one hump, Markdown emphasis.
+        ("iPhone JavaScript PhD McDonald __bold__ _it_", []),
+        (
+            "sha 964670f15c6b47f9b8f9340732720473 id "
+            "964670f1-5c6b-47f9-b8f9-340732720473 b64 aGVsbG8gd29ybGQgaG93",
+            [
+                (LiteralKind.ENCODED, "964670f15c6b47f9b8f9340732720473"),
+                (LiteralKind.ENCODED, "964670f1-5c6b-47f9-b8f9-340732720473"),
+                (LiteralKind.ENCODED, "aGVsbG8gd29ybGQgaG93"),
+            ],
+        ),
+        # Not encoded: long words without digits, hyphenated words with a number.
+        ("antidisestablishmentarianism COVID-19-related", [(LiteralKind.NUMBER, "19")]),
+    ],
+)
+def test_find_code_paths_identifiers_and_encoded(
+    text: str, expected: list[tuple[LiteralKind, str]]
+) -> None:
+    assert [(span.kind, span.text) for span in find_literals(text)] == expected
+
+
+BLOCK_TEXT = "fix it:\n\n```\nprint(x)  # all names\n```\n\nthen run it."
+
+
+def test_code_blocks_never_reach_the_model() -> None:
+    seen: list[str] = []
+
+    def record(texts: list[str]) -> list[Translation]:
+        seen.extend(texts)
+        return upper(texts)
+
+    (result,) = translate_preserving([BLOCK_TEXT], record)
+    assert result.text == "FIX IT:\n\n```\nprint(x)  # all names\n```\n\nTHEN RUN IT."
+    assert result.preservation == "segments"
+    assert seen == ["fix it:", "then run it."]
+
+
+def test_code_blocks_mixed_with_other_literals_and_plain_texts() -> None:
+    texts = [BLOCK_TEXT + " see https://a.io", "plain text", "```\nonly code\n```"]
+    results = translate_preserving(texts, upper)
+    assert [r.text for r in results] == [
+        "FIX IT:\n\n```\nprint(x)  # all names\n```\n\nTHEN RUN IT. SEE https://a.io",
+        "PLAIN TEXT",
+        "```\nonly code\n```",
+    ]
+    assert [r.preservation for r in results] == ["segments", None, "segments"]
+
+
+def test_code_blocks_go_to_the_model_when_not_preserved() -> None:
+    kinds = frozenset(LiteralKind) - {LiteralKind.CODE_BLOCK}
+    (result,) = translate_preserving([BLOCK_TEXT], upper, kinds=kinds)
+    assert result.text == BLOCK_TEXT.upper()
+
+
+def test_a_failed_prose_piece_fails_the_text_with_code_blocks() -> None:
+    def fails_on_run(texts: list[str]) -> list[Translation]:
+        return [
+            Translation(t, status=TranslationStatus.FAILED, error="ValueError: boom")
+            if "run" in t
+            else Translation(t.upper())
+            for t in texts
+        ]
+
+    (result,) = translate_preserving([BLOCK_TEXT], fails_on_run)
+    assert result.status is TranslationStatus.FAILED
+    assert result.text == BLOCK_TEXT

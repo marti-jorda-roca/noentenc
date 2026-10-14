@@ -218,12 +218,12 @@ These are macOS figures. macOS compresses memory that isn't being used, which lo
 
 ### Literal text
 
-`scripts/evaluate_literals.py` translates 26 support-style messages full of URLs, emails, code, placeholders, tags and numbers (16 English ones into Spanish and German, 6 Spanish and 4 German ones into English), with and without `preserve`. **Kept** is the share of texts whose literals all came back byte-for-byte. **Placeholders** and **Pieces** say how often preservation took each path.
+`scripts/evaluate_literals.py` translates 26 support-style messages full of URLs, emails, code, paths, placeholders, tags and numbers (16 English ones into Spanish and German, 6 Spanish and 4 German ones into English), with and without `preserve`. **Kept** is the share of texts whose literals all came back byte-for-byte. **Placeholders** and **Pieces** say how often preservation took each path.
 
 | Model | Texts | Kept, `preserve=False` | Kept | Placeholders | Pieces |
 |---|---:|---:|---:|---:|---:|
-| Opus-MT | 42 | 50% | **100%** | 98% | 2% |
-| SMaLL-100 | 42 | 50% | **100%** | 93% | 7% |
+| Opus-MT | 42 | 50% | **100%** | 100% | 0% |
+| SMaLL-100 | 42 | 50% | **100%** | 90% | 10% |
 | NLLB-200 600M int8 | 42 | 38% | **100%** | 93% | 7% |
 | M2M100 418M int8 | 42 | 48% | **100%** | 95% | 5% |
 
@@ -332,7 +332,7 @@ chrF++ ([sacrebleu](https://github.com/mjpost/sacrebleu), `word_order=2`) on the
 
 Chinese and Japanese scores are low for every model because chrF++ counts word n-grams, and those languages aren't written with spaces. Compare them across models, not with the other rows.
 
-- **Every profile uses Opus-MT where it has a model.** On those 8 pairs it averages 50.5, against 50.2 for NLLB-200 fp32, and it's about 8× faster in batches. NLLB-200 is better into English and Opus-MT is better out of it.
+- **Every profile uses Opus-MT where it has a model.** On those 8 pairs it averages 50.5 at q4 (`quality` loads fp32, a little higher; see [Opus-MT precision](#opus-mt-precision)), against 50.2 for NLLB-200 fp32, and it's about 8× faster in batches. NLLB-200 is better into English and Opus-MT is better out of it.
 - **On the other pairs, NLLB-200 beats SMaLL-100 on every pair.** The gap is small on high-resource pairs (1 to 2 points on en→ja and de→it) and large on low-resource ones (7 points on sw→en, 19 on en→ta). It's also about 6× slower in batches, which is why `speed` keeps SMaLL-100.
 - **fp32 adds a little over int8**: 0.25 points on average over the five pairs without Opus-MT. int8 downloads 4× less, loads 4× faster and needs less memory. On the M3, fp32 is nonetheless faster for single sentences and as fast in batches; other CPUs may differ.
 - **q4 hurts NLLB-200 and M2M100, so both default to int8.** At q4, NLLB-200 scored up to 7 points lower (en→ta 40.3 against 47.2, en→fi 42.3 against 47.5) and M2M100 up to 26 points lower (en→sw 18.3 against 44.8, en→de 36.9 against 52.8). Their q4 files are also 2 to 2.6× larger.
@@ -340,41 +340,42 @@ Chinese and Japanese scores are low for every model because chrF++ counts word n
 
 ### Opus-MT precision
 
-Opus-MT int8 against q4, the default, on the full FLORES-200 devtest (1,012 sentences per pair): the 8 Opus-MT pairs above plus 4 more.
+Opus-MT at each precision on the full FLORES-200 devtest (1,012 sentences per pair): the 8 Opus-MT pairs above plus 4 more.
 
-| Pair | q4 (default) | int8 |
-|---|---:|---:|
-| en→es | 51.92 | **52.17** |
-| es→en | 55.02 | **55.13** |
-| en→de | 59.75 | **59.83** |
-| de→en | 63.03 | **63.21** |
-| en→zh | 20.76 | **21.27** |
-| zh→en | 49.56 | **49.86** |
-| en→fi | 52.74 | **53.37** |
-| fr→de | 52.04 | **52.12** |
-| ja→en | **45.17** | 45.06 |
-| ru→en | 54.50 | **54.59** |
-| en→ru | 50.47 | **50.79** |
-| it→en | **56.53** | 56.50 |
-| Average | 50.96 | **51.16** |
-| Download | 287 MB | 107 MB |
-| RAM ([Memory](#memory)) | 1.08 GB | 630 MB |
-| Single sentence (en→es) | 54 to 65 ms | 82 to 88 ms |
-| Sentences/s, batches of 32 | 83 to 121 | 88 to 91 |
+| Pair | q4 (default) | int8 | fp32 |
+|---|---:|---:|---:|
+| en→es | 51.92 | 52.14 | **52.22** |
+| es→en | 55.02 | 55.13 | **55.24** |
+| en→de | 59.75 | 59.72 | **59.79** |
+| de→en | 63.03 | 63.21 | **63.31** |
+| en→zh | 20.76 | 21.31 | **21.65** |
+| zh→en | 49.56 | 49.76 | **49.99** |
+| en→fi | 52.74 | 53.33 | **53.56** |
+| fr→de | 52.04 | 52.34 | **52.53** |
+| ja→en | 45.17 | 45.06 | **45.39** |
+| ru→en | 54.50 | 54.59 | **55.03** |
+| en→ru | 50.47 | 50.83 | **51.23** |
+| it→en | 56.53 | 56.50 | **56.54** |
+| Average | 50.96 | 51.16 | **51.37** |
+| Download | 287 MB | 107 MB | 425 MB |
+| RAM ([Memory](#memory)) | 1.08 GB | 630 MB | 1.31 GB |
+| Single sentence (en→es) | 54 to 65 ms | 82 to 88 ms | 56 ms |
+| Sentences/s, batches of 32 | 83 to 121 | 88 to 91 | 121 |
 
-The speed rows are the range over three interleaved runs of `scripts/benchmark_translation.py --models opus-mt --precisions q4 int8` on the M3.
+The q4 and int8 speed rows are the range over three interleaved runs of `scripts/benchmark_translation.py --models opus-mt --precisions q4 int8` on the M3; the fp32 ones come from the [translation benchmark](#translation). The scores are from one run of all three precisions. q4 matched an earlier run to the hundredth on every pair, but int8 moved by up to 0.1 point on some (en→es 52.17 then 52.14, en→de 59.83 then 59.72), so read differences that small as noise.
 
-- **The two translate equally well.** int8 is 0.2 points ahead on average, and ahead on 10 of the 12 pairs, by at most 0.6 points. That is within the noise of a 1,012-sentence test set.
-- **int8 is lighter**: a 2.7× smaller download and 42% less RAM.
-- **q4 is faster one sentence at a time** on the M3, by about 25 ms. In batches the two are about as fast.
+- **fp32 is the most accurate, on every pair.** It is 0.4 points ahead of q4 on average and up to 0.9 (en→zh), and 0.2 ahead of int8. Small gaps, but the same sign on all 12 pairs.
+- **int8 and q4 translate about equally well.** int8 is 0.2 points ahead on average and behind on 3 of the 12 pairs.
+- **int8 is lighter**: a 2.7× smaller download and 42% less RAM than q4. fp32 is the heaviest, at 425 MB and 1.31 GB.
+- **On the M3, fp32 is also the fastest in batches**, and q4 one sentence at a time.
 
-q4 stays the default, because `speed` is about latency and the quality is the same. Pass `precision="int8"` to `OpusMTModel` when downloads or memory matter more. Profiles switch to int8 on their own when `max_download_bytes` rules out q4 (see [Routing](#routing)). Other CPUs, x86 ones with VNNI in particular, may run int8 faster; benchmark yours before you choose.
+So the `quality` profile loads Opus-MT at fp32, and `speed` and `balance` keep q4, the smaller download that is faster one sentence at a time. With a model of your own, pass `precision="fp32"` to `OpusMTModel` for the best translations and `precision="int8"` when downloads or memory matter more. Profiles switch to int8 on their own when `max_download_bytes` rules out q4 (see [Routing](#routing)). Other CPUs, x86 ones with VNNI in particular, may run int8 faster; benchmark yours before you choose.
 
 To reproduce:
 
 ```bash
 uv run --with sacrebleu python scripts/benchmark_accuracy.py translation --flores flores200_dataset \
-    --sentences 1012 --models opus-mt-q4 opus-mt-int8 \
+    --sentences 1012 --models opus-mt-q4 opus-mt-int8 opus-mt-fp32 \
     --pairs en-es es-en en-de de-en en-zh zh-en en-fi fr-de ja-en ru-en en-ru it-en
 ```
 
@@ -384,11 +385,11 @@ Which model each profile uses for a pair:
 
 | Pair | `speed` | `balance` | `quality` |
 |---|---|---|---|
-| One of the 66 Opus-MT pairs | Opus-MT, q4 | Opus-MT, q4 | Opus-MT, q4 |
+| One of the 66 Opus-MT pairs | Opus-MT, q4 | Opus-MT, q4 | Opus-MT, fp32 |
 | Another pair NLLB-200 covers on both sides | SMaLL-100 | NLLB-200, int8 | NLLB-200, fp32 |
 | No source language, or a source NLLB-200 lacks | SMaLL-100 | SMaLL-100 | SMaLL-100 |
 | A target SMaLL-100 lacks (Acehnese, Dzongkha...) | none | NLLB-200, int8 | NLLB-200, fp32 |
 
-So the three profiles pick the same model, with the same output, for every Opus-MT pair and for every text without a source language. `quality` only changes the output for pairs without an Opus-MT model, where it uses NLLB-200 at fp32 instead of int8. On FLORES-200 that adds 0.25 chrF++ on average.
+So `speed` and `balance` pick the same model, with the same output, for every Opus-MT pair, and all three do for every text without a source language. `quality` uses Opus-MT at fp32, which adds 0.4 chrF++ on average over q4 ([Opus-MT precision](#opus-mt-precision)), and NLLB-200 at fp32 instead of int8 for pairs without an Opus-MT model, which adds 0.25.
 
-`allowed_licenses` and `max_download_bytes` skip a model to the next one down its column. Opus-MT q4 then gives way to Opus-MT int8, and NLLB-200 to SMaLL-100. A pair with nothing left raises `ModelConstraintError` before anything downloads. `Translator(profile).plan(target, source)` names the model a pair would use, with its licence, download size, RAM and cache state. `supports()` and `supported_languages()` answer which pairs work. None of these load or download a model.
+`allowed_licenses` and `max_download_bytes` skip a model to the next one down its column. Opus-MT then gives way to its smaller exports (fp32 to q4, q4 to int8), and NLLB-200 to SMaLL-100. A pair with nothing left raises `ModelConstraintError` before anything downloads. `Translator(profile).plan(target, source)` names the model a pair would use, with its licence, download size, RAM and cache state. `supports()` and `supported_languages()` answer which pairs work. None of these load or download a model.

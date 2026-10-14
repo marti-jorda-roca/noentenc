@@ -10,6 +10,7 @@ from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import WhitespaceSplit
 
 from noentenc.languages import Language, UnsupportedLanguageError
+from noentenc.translation import Translator
 from noentenc.translation.models import _seq2seq
 from noentenc.translation.models._engine import GenerationConfig
 from noentenc.translation.models._hub import resolve_files
@@ -385,3 +386,94 @@ def test_m2m100_drops_merges_outside_the_vocab() -> None:
         }
     }
     assert _drop_invalid_merges(spec)["model"]["merges"] == ["a b"]
+
+
+def test_split_long_translates_every_piece(m2m_dir: Path) -> None:
+    model = SMaLL100Model(m2m_dir)
+    text = " ".join(["hello"] * 40)
+    (result,) = model.predict_batch_detailed([text], EN, split_long=True)
+    assert result.text == text
+    assert result.input_split
+    assert not result.input_truncated
+    rows = fed_rows()
+    assert len(rows) > 1
+    assert all(len(row) <= model.max_length for row in rows)
+    # Short sentences are untouched.
+    (short,) = model.predict_batch_detailed(["hello world"], EN, split_long=True)
+    assert not short.input_split
+
+
+def loops_when_longer_than(
+    monkeypatch: pytest.MonkeyPatch, model: SMaLL100Model, tokens: int
+) -> None:
+    """Make the engine repeat itself on rows of more than `tokens` tokens."""
+    hello = model._token_id("hello")
+
+    def generate(
+        _self: FakeEngine,
+        input_ids: np.ndarray,
+        mask: np.ndarray,
+        config: GenerationConfig,
+    ) -> list[list[int]]:
+        FakeEngine.calls.append((input_ids, mask, config))
+        return [
+            [hello] * config.max_new_tokens
+            if row_mask.sum() > tokens
+            else row[row_mask == 1].tolist()
+            for row, row_mask in zip(input_ids, mask, strict=True)
+        ]
+
+    monkeypatch.setattr(FakeEngine, "generate", generate)
+
+
+def test_split_long_retries_runaway_output_in_halves(
+    m2m_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = SMaLL100Model(m2m_dir)
+    loops_when_longer_than(monkeypatch, model, 10)
+    text = " ".join(["hola"] * 12)
+    (plain,) = model.predict_batch_detailed([text], EN)
+    assert plain.output_limit_reached
+    (retried,) = model.predict_batch_detailed([text], EN, split_long=True)
+    assert retried.text == text
+    assert not retried.output_limit_reached
+    assert retried.input_split
+
+
+def test_split_long_keeps_the_first_output_when_halves_also_run_away(
+    m2m_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = SMaLL100Model(m2m_dir)
+    loops_when_longer_than(monkeypatch, model, 0)
+    (result,) = model.predict_batch_detailed(
+        [" ".join(["hola"] * 12)], EN, split_long=True
+    )
+    assert result.output_limit_reached
+    assert not result.input_split
+
+
+def test_models_have_a_readable_repr(m2m_dir: Path) -> None:
+    model = SMaLL100Model(m2m_dir)
+    assert repr(model) == f"SMaLL100Model(model={str(m2m_dir)!r}, precision='int8')"
+
+
+def test_a_loaded_model_plans_itself(m2m_dir: Path, opus_dir: Path) -> None:
+    model = SMaLL100Model(m2m_dir)
+    plan = model.plan()
+    files = SMaLL100Model.filenames()
+    assert plan.name == f"SMaLL100Model({m2m_dir})"
+    assert (plan.precision, plan.license, plan.cached) == ("int8", "MIT", True)
+    assert plan.files == tuple(files)
+    assert plan.download_bytes == sum((m2m_dir / name).stat().st_size for name in files)
+    assert plan.memory_basis.startswith("measured")
+    # Opus-MT's licence is per pair; an unknown repo has none.
+    assert OpusMTModel(opus_dir).plan().license == "unknown"
+
+
+def test_translator_plans_its_given_model(opus_dir: Path) -> None:
+    translator = Translator(OpusMTModel(opus_dir))
+    (plan,) = translator.plan(ZH, EN).models
+    assert plan.name == f"OpusMTModel({opus_dir})"
+    assert plan.precision == "q4"
+    with pytest.raises(UnsupportedLanguageError):
+        translator.plan(EN, ES)

@@ -87,6 +87,20 @@ def test_quality_uses_fp32_nllb_with_measured_memory() -> None:
     assert model.download_bytes > 3_000_000_000
 
 
+def test_quality_uses_fp32_opus_mt_and_smaller_exports_under_a_limit() -> None:
+    (fp32,) = Translator("quality").plan(ES, EN).models
+    assert (fp32.name, fp32.precision) == ("OpusMTModel(Xenova/opus-mt-en-es)", "fp32")
+    assert fp32.memory_basis.startswith("measured")
+    (q4,) = Translator("quality", max_download_bytes=300 << 20).plan(ES, EN).models
+    assert q4.precision == "q4"
+    (int8,) = Translator("quality", max_download_bytes=200 << 20).plan(ES, EN).models
+    assert int8.precision == "int8"
+    assert int8.download_bytes < q4.download_bytes < fp32.download_bytes
+    # The other profiles keep q4.
+    for profile in ("speed", "balance"):
+        assert Translator(profile).plan(ES, EN).models[0].precision == "q4"
+
+
 def test_plans_agree_with_what_the_translator_loads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -238,8 +252,14 @@ def test_explicit_models_answer_from_their_schema() -> None:
     translator = Translator(UpperModel())
     assert translator.supports(ES, EN)
     assert translator.supported_languages() == UpperModel.schema
-    with pytest.raises(ValueError, match="profile models"):
-        translator.plan(ES)
+    # A given model describes itself; only its name is known for a custom one.
+    (model,) = translator.plan(ES).models
+    assert model.name == "UpperModel(upper)"
+    assert (model.license, model.precision, model.cached) == ("unknown", None, True)
+    # With "auto", the profile's detector comes first.
+    detector, model = translator.plan(ES, "auto").models
+    assert detector.task == "detection"
+    assert model.name == "UpperModel(upper)"
     with pytest.raises(ValueError, match="a profile loads"):
         Translator(UpperModel(), allowed_licenses=OPEN)
 

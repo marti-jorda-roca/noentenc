@@ -2,6 +2,8 @@
 
 noentenc detects languages and translates text in Python, on CPU, without torch. This folder holds the guides, the benchmarks and runnable examples. The [project README](../README.md) is the short tour; start there if you haven't seen the library before.
 
+These pages follow the `main` branch, which can be ahead of the latest release on PyPI. For the version you have installed (`noentenc info` prints it), read the docs at its tag, `https://github.com/marti-jorda-roca/noentenc/tree/v<version>/docs`.
+
 ## Start here
 
 1. Install the package with translation support, with pip or uv. It needs Python 3.11 or newer.
@@ -95,7 +97,7 @@ The docstring at the top of each script says which extras it needs and what it d
 | Script | What it shows |
 |---|---|
 | [translate_to_english.py](examples/translate_to_english.py) | Translate a mixed-language inbox and DataFrame into English in one call with `source_language="auto"`. |
-| [translate_long_text.py](examples/translate_long_text.py) | Translate emails and documents, and choose between an error and `truncate=True` for over-long sentences. |
+| [translate_long_text.py](examples/translate_long_text.py) | Translate emails and documents, and choose between an error, `split_long=True` and `truncate=True` for over-long sentences. |
 | [preserve_literals.py](examples/preserve_literals.py) | Translate messages without breaking their links, emails, code, tags, placeholders and brand names. |
 | [translate_bulk.py](examples/translate_bulk.py) | Run bulk jobs with `errors="record"` so one bad row doesn't stop them. |
 | [choose_translation_model.py](examples/choose_translation_model.py) | Pick a model, precision and thread count. |

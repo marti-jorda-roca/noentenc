@@ -28,8 +28,9 @@ print(best_detector.detect_batch(texts, with_score=True, top_k=2))
 # into Swahili (swa).
 
 # Every translation profile uses a dedicated Opus-MT model when the pair has one:
-# there it scores as well as NLLB-200 on average and is about 8x faster. English -> Spanish is such a pair, so all three
-# profiles translate it with the same model.
+# there it scores as well as NLLB-200 on average and is about 8x faster. English ->
+# Spanish is such a pair. `speed` and `balance` load it at q4 and `quality` at fp32,
+# which scores a little higher; on a short sentence the output is usually the same.
 print(Translator("quality").translate("Where is the station?", ES, EN))
 # '¿Dónde está la estación?'
 
