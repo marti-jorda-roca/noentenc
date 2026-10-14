@@ -51,6 +51,9 @@ class Translation:
     # translated piece by piece, because the text had a fenced code block or placeholders
     # didn't survive), or None when the text had none or `preserve=False`.
     preservation: str | None = None
+    # A sentence was translated in pieces (only with `split_long=True`): it was longer
+    # than the model reads, or its output hit the length limit and its halves didn't.
+    input_split: bool = False
 
 
 class BaseModel(ABC):
@@ -86,11 +89,13 @@ class BaseModel(ABC):
         batch_size: int = 32,
         *,
         truncate: bool = False,
+        split_long: bool = False,
     ) -> list[Translation]:
         """Like `predict_batch`, with what was dropped on the way in or out.
 
-        This default ignores `truncate` and reports nothing missing; models that know
-        their length limits override it.
+        This default ignores `truncate` and `split_long` and reports nothing missing;
+        models that know their length limits override it. `Translator` only passes
+        `split_long` when it's True, so overrides written without it keep working.
         """
         return [
             Translation(text)

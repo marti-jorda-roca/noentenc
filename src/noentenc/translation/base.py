@@ -342,6 +342,7 @@ class Translator:
         source_language: Language | str | None = None,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[False] = False,
         unknown_source: UnknownSourcePolicy = "keep",
         preserve: PreservePolicy = True,
@@ -355,6 +356,7 @@ class Translator:
         source_language: Language | str | None = None,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[True],
         unknown_source: UnknownSourcePolicy = "keep",
         preserve: PreservePolicy = True,
@@ -367,14 +369,18 @@ class Translator:
         source_language: Language | str | None = None,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: bool = False,
         unknown_source: UnknownSourcePolicy = "keep",
         preserve: PreservePolicy = True,
     ) -> str | Translation:
         """Translate `text`, sentence by sentence, keeping its whitespace and line breaks.
 
-        A sentence longer than the model reads raises `InputTooLongError`; with
-        `truncate` its end is dropped instead. With `detailed` the result is a
+        A sentence longer than the model reads raises `InputTooLongError`. With
+        `split_long` it is cut into pieces that fit, at clause punctuation or spaces, and
+        each piece is translated, so nothing is lost; a sentence whose output hits the
+        length limit is translated again in halves too. With `truncate` its end is
+        dropped instead. With `detailed` the result is a
         `Translation`, which says whether input was dropped or output cut short, which
         source language and model were used, and what the detector found.
 
@@ -396,6 +402,7 @@ class Translator:
             "raise",
             unknown_source,
             preserve=preserve,
+            split_long=split_long,
         )
         return translation if detailed else translation.text
 
@@ -408,6 +415,7 @@ class Translator:
         batch_size: int = 32,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[False] = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
@@ -423,6 +431,7 @@ class Translator:
         batch_size: int = 32,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[True],
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
@@ -437,6 +446,7 @@ class Translator:
         batch_size: int = 32,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: bool = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
@@ -461,6 +471,7 @@ class Translator:
             errors,
             unknown_source,
             preserve=preserve,
+            split_long=split_long,
         )
         return translations if detailed else [t.text for t in translations]
 
@@ -474,6 +485,7 @@ class Translator:
         *,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[False] = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
@@ -490,6 +502,7 @@ class Translator:
         *,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: Literal[True],
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
@@ -505,6 +518,7 @@ class Translator:
         *,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         truncate: bool = False,
+        split_long: bool = False,
         detailed: bool = False,
         errors: ErrorPolicy = "raise",
         unknown_source: UnknownSourcePolicy = "keep",
@@ -543,6 +557,7 @@ class Translator:
             errors,
             unknown_source,
             preserve,
+            split_long=split_long,
         )
         return translations if detailed else (t.text for t in translations)
 
@@ -556,6 +571,8 @@ class Translator:
         errors: ErrorPolicy,
         unknown_source: UnknownSourcePolicy,
         preserve: PreservePolicy,
+        *,
+        split_long: bool,
     ) -> Iterator[Translation]:
         offset = 0
         for chunk in chunks:
@@ -568,6 +585,7 @@ class Translator:
                 errors,
                 unknown_source,
                 preserve=preserve,
+                split_long=split_long,
                 offset=offset,
             )
             offset += len(chunk)
@@ -584,6 +602,7 @@ class Translator:
         show_progress: bool = True,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         errors: ErrorPolicy = "raise",
         error_column: str | None = None,
         unknown_source: UnknownSourcePolicy = "keep",
@@ -604,6 +623,7 @@ class Translator:
         show_progress: bool = True,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         errors: ErrorPolicy = "raise",
         error_column: str | None = None,
         unknown_source: UnknownSourcePolicy = "keep",
@@ -623,6 +643,7 @@ class Translator:
         show_progress: bool = True,
         *,
         truncate: bool = False,
+        split_long: bool = False,
         errors: ErrorPolicy = "raise",
         error_column: str | None = None,
         unknown_source: UnknownSourcePolicy = "keep",
@@ -634,7 +655,7 @@ class Translator:
 
         Works with polars and pandas frames; rows keep their order and null texts stay
         null. Texts are translated like `translate_batch`, including `truncate`,
-        `errors`, `source_language="auto"` and `unknown_source`. With
+        `split_long`, `errors`, `source_language="auto"` and `unknown_source`. With
         `errors="record"` a row whose translation raises gets a null translation, and
         its error in `error_column` if given (null for the other rows).
 
@@ -664,6 +685,7 @@ class Translator:
                 unknown_source,
                 progress=progress.update,
                 preserve=preserve,
+                split_long=split_long,
             )
         results: list[str | None] = [None] * len(values)
         failures: list[str | None] = [None] * len(values)
@@ -699,6 +721,7 @@ class Translator:
         progress: Callable[[int], object] | None = None,
         *,
         preserve: PreservePolicy = True,
+        split_long: bool = False,
         offset: int = 0,
     ) -> list[Translation]:
         """Translate `texts`, answering what needs no model before loading one.
@@ -751,6 +774,7 @@ class Translator:
                     truncate,
                     errors,
                     kinds,
+                    split_long=split_long,
                 )
                 for i, translation in zip(indices, translated, strict=True):
                     results[i] = replace(
@@ -774,12 +798,16 @@ class Translator:
         truncate: bool,
         errors: ErrorPolicy,
         kinds: frozenset[LiteralKind] | None,
+        *,
+        split_long: bool,
     ) -> list[Translation]:
         """`kinds` are the literals to keep, with `keep`'s terms; None keeps nothing."""
 
         def run(batch: list[str]) -> list[Translation]:
+            # Only when asked, so models written before `split_long` keep working.
+            extra = {"split_long": True} if split_long else {}
             return model.predict_batch_detailed(
-                batch, target, source, batch_size, truncate=truncate
+                batch, target, source, batch_size, truncate=truncate, **extra
             )
 
         def translate(batch: list[str]) -> list[Translation]:

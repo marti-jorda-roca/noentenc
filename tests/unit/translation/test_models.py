@@ -385,3 +385,67 @@ def test_m2m100_drops_merges_outside_the_vocab() -> None:
         }
     }
     assert _drop_invalid_merges(spec)["model"]["merges"] == ["a b"]
+
+
+def test_split_long_translates_every_piece(m2m_dir: Path) -> None:
+    model = SMaLL100Model(m2m_dir)
+    text = " ".join(["hello"] * 40)
+    (result,) = model.predict_batch_detailed([text], EN, split_long=True)
+    assert result.text == text
+    assert result.input_split
+    assert not result.input_truncated
+    rows = fed_rows()
+    assert len(rows) > 1
+    assert all(len(row) <= model.max_length for row in rows)
+    # Short sentences are untouched.
+    (short,) = model.predict_batch_detailed(["hello world"], EN, split_long=True)
+    assert not short.input_split
+
+
+def loops_when_longer_than(
+    monkeypatch: pytest.MonkeyPatch, model: SMaLL100Model, tokens: int
+) -> None:
+    """Make the engine repeat itself on rows of more than `tokens` tokens."""
+    hello = model._token_id("hello")
+
+    def generate(
+        _self: FakeEngine,
+        input_ids: np.ndarray,
+        mask: np.ndarray,
+        config: GenerationConfig,
+    ) -> list[list[int]]:
+        FakeEngine.calls.append((input_ids, mask, config))
+        return [
+            [hello] * config.max_new_tokens
+            if row_mask.sum() > tokens
+            else row[row_mask == 1].tolist()
+            for row, row_mask in zip(input_ids, mask, strict=True)
+        ]
+
+    monkeypatch.setattr(FakeEngine, "generate", generate)
+
+
+def test_split_long_retries_runaway_output_in_halves(
+    m2m_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = SMaLL100Model(m2m_dir)
+    loops_when_longer_than(monkeypatch, model, 10)
+    text = " ".join(["hola"] * 12)
+    (plain,) = model.predict_batch_detailed([text], EN)
+    assert plain.output_limit_reached
+    (retried,) = model.predict_batch_detailed([text], EN, split_long=True)
+    assert retried.text == text
+    assert not retried.output_limit_reached
+    assert retried.input_split
+
+
+def test_split_long_keeps_the_first_output_when_halves_also_run_away(
+    m2m_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = SMaLL100Model(m2m_dir)
+    loops_when_longer_than(monkeypatch, model, 0)
+    (result,) = model.predict_batch_detailed(
+        [" ".join(["hola"] * 12)], EN, split_long=True
+    )
+    assert result.output_limit_reached
+    assert not result.input_split

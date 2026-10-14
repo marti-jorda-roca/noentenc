@@ -501,6 +501,7 @@ def _translate_pieces(
                 input_truncated=any(d.input_truncated for d in done),
                 output_limit_reached=any(d.output_limit_reached for d in done),
                 preservation=SEGMENTS,
+                input_split=any(d.input_split for d in done),
             )
         )
     return results

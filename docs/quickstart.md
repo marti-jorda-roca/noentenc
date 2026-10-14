@@ -163,18 +163,24 @@ translator.translate(
 # 'Hola Ana,\n\nGracias por tu ayuda.\n- Nos vemos el lunes.\n- Llámame más tarde.'
 ```
 
-A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` rather than losing its end. `truncate=True` translates its start instead. To find out whether that happened, or whether a translation stopped at the output length limit, ask for details.
+A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` rather than losing its end. Pasted logs, transcripts and chat messages without punctuation are often one sentence that long. You have two ways to translate it anyway:
+
+- `split_long=True` cuts it into pieces of at most 128 tokens, after a comma, semicolon or colon where it can and at a space otherwise, and translates each piece. Nothing is lost. Pieces aren't cut longer because the models drop content from inputs anywhere near their limit: on run-on sentences built from FLORES-200, pieces near the 511-token limit scored 47.1 and 41.2 chrF++, against 52.0 and 51.5 at 128 tokens. With it, a sentence whose translation hits the output length limit, which usually means the model is repeating itself, is also translated again in two halves.
+- `truncate=True` translates only its start.
+
+To find out whether either happened, or whether a translation stopped at the output length limit, ask for details.
 
 ```python
 result = translator.translate(
-    email_body, Language.SPANISH, Language.ENGLISH, truncate=True, detailed=True
+    email_body, Language.SPANISH, Language.ENGLISH, split_long=True, detailed=True
 )
 result.text
+result.input_split  # True if a sentence was translated in pieces
 result.input_truncated  # True if part of a sentence was dropped
 result.output_limit_reached  # True if the output may be cut short
 ```
 
-`translate_batch` takes the same `truncate` and `detailed` arguments, and `translate_dataset` takes `truncate`.
+`translate_batch`, `translate_stream` and `translate_dataset` take the same `split_long` and `truncate` arguments, and `translate_batch` and `translate_stream` take `detailed`.
 
 Blank texts, and texts whose source language is already the target, come back unchanged without loading a model. Their detailed status is `unchanged`.
 

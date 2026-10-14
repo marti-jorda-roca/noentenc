@@ -130,7 +130,7 @@ translator.translate_batch(
 
 `Translator()` picks the lightest model for each pair. It uses a dedicated Opus-MT model when one exists for the direction (66 directions, about 75M parameters each). For any other pair it uses SMaLL-100, which covers 100 languages, and so does a call with no source language at all. A model that can't handle a pair raises `UnsupportedLanguageError`. Languages are `Language` members or codes and names: `"es"`, `"spa"`, `"es-ES"` and `"spanish"` all mean Spanish. `noentenc.to_language()` does that conversion on its own, which also turns detector labels like `"spa"` or `"cmn"` into `Language` members.
 
-Text of any length works. It is split into sentences, they are translated in one batch, and the translations are joined back with the original spaces, line breaks and blank lines. A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` instead of being cut silently. Pass `truncate=True` to translate only its start, and `detailed=True` to get a `Translation` that says whether input was dropped (`input_truncated`) or the output hit its length limit (`output_limit_reached`).
+Text of any length works. It is split into sentences, they are translated in one batch, and the translations are joined back with the original spaces, line breaks and blank lines. A single sentence longer than the model can read (about 500 tokens) raises `InputTooLongError` instead of being cut silently. Pass `split_long=True` to translate it in pieces that fit, cut after commas or at spaces, or `truncate=True` to translate only its start. `detailed=True` gives a `Translation` that says whether a sentence was split (`input_split`), input was dropped (`input_truncated`) or the output hit its length limit (`output_limit_reached`).
 
 `Translator` keeps the models it loads for later calls, at most two at a time by default. A loaded model needs a lot more RAM than its download: about 1.1 GB for an Opus-MT pair at q4 and 1.15 GB for SMaLL-100. Pass `max_loaded_models=` to change the limit (`None` for no limit), and call `translator.unload()` to free them all. See [memory](docs/benchmarks.md#memory).
 
@@ -227,7 +227,7 @@ Results go to stdout and progress and errors to stderr, and the exit code says w
 | [choose_detection_backend.py](docs/examples/choose_detection_backend.py) | Swap backends, restrict candidate languages, collapse macrolanguages. |
 | [choose_translation_model.py](docs/examples/choose_translation_model.py) | Pick a model, precision and thread count, and run offline. |
 | [prepare_offline.py](docs/examples/prepare_offline.py) | Download a profile's weights into one directory, then detect and translate without network access. |
-| [translate_long_text.py](docs/examples/translate_long_text.py) | Translate emails and documents, and choose between an error and `truncate=True` for over-long sentences. |
+| [translate_long_text.py](docs/examples/translate_long_text.py) | Translate emails and documents, and choose between an error, `split_long=True` and `truncate=True` for over-long sentences. |
 | [manage_memory.py](docs/examples/manage_memory.py) | Bound how many translation models stay loaded, and free them with `unload()`. |
 | [stream_detection.py](docs/examples/stream_detection.py) | Label every line of a large file with flat memory, and stop reading once you have what you need. |
 | [stream_translation.py](docs/examples/stream_translation.py) | Translate a JSON Lines file of any size with `translate_stream`, writing each result as it comes. |

@@ -95,7 +95,7 @@ The docstring at the top of each script says which extras it needs and what it d
 | Script | What it shows |
 |---|---|
 | [translate_to_english.py](examples/translate_to_english.py) | Translate a mixed-language inbox and DataFrame into English in one call with `source_language="auto"`. |
-| [translate_long_text.py](examples/translate_long_text.py) | Translate emails and documents, and choose between an error and `truncate=True` for over-long sentences. |
+| [translate_long_text.py](examples/translate_long_text.py) | Translate emails and documents, and choose between an error, `split_long=True` and `truncate=True` for over-long sentences. |
 | [preserve_literals.py](examples/preserve_literals.py) | Translate messages without breaking their links, emails, code, tags, placeholders and brand names. |
 | [translate_bulk.py](examples/translate_bulk.py) | Run bulk jobs with `errors="record"` so one bad row doesn't stop them. |
 | [choose_translation_model.py](examples/choose_translation_model.py) | Pick a model, precision and thread count. |

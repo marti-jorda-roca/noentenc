@@ -261,6 +261,12 @@ def _compile_patterns(
     "failing the text.",
 )
 @click.option(
+    "--split-long",
+    is_flag=True,
+    help="Translate a sentence too long for the model in pieces that fit instead "
+    "of failing the text, and retry in halves a sentence whose translation runs on.",
+)
+@click.option(
     "--keep",
     "keep_terms",
     multiple=True,
@@ -306,6 +312,7 @@ def translate(
     source: str,
     unknown_source: UnknownSourcePolicy,
     truncate: bool,
+    split_long: bool,
     keep_terms: list[str],
     keep_patterns: list[re.Pattern[str]],
     no_preserve: bool,
@@ -337,6 +344,7 @@ def translate(
         target,
         source,
         truncate=truncate,
+        split_long=split_long,
         detailed=True,
         errors="record",
         unknown_source=unknown_source,
