@@ -454,7 +454,7 @@ def test_split_long_keeps_the_first_output_when_halves_also_run_away(
 
 def test_models_have_a_readable_repr(m2m_dir: Path) -> None:
     model = SMaLL100Model(m2m_dir)
-    assert repr(model) == f"SMaLL100Model(model='{m2m_dir}', precision='int8')"
+    assert repr(model) == f"SMaLL100Model(model={str(m2m_dir)!r}, precision='int8')"
 
 
 def test_a_loaded_model_plans_itself(m2m_dir: Path, opus_dir: Path) -> None:
